@@ -1,0 +1,37 @@
+{
+  "feature_names": [
+    "r_score",
+    "f_score",
+    "m_score",
+    "tenure_days",
+    "avg_sentiment_30",
+    "neg_msg_count_30",
+    "avg_response_secs",
+    "intensity_7d"
+  ],
+  "feature_types": {
+    "r_score": "numeric",
+    "f_score": "numeric",
+    "m_score": "numeric",
+    "tenure_days": "numeric",
+    "avg_sentiment_30": "numeric",
+    "neg_msg_count_30": "numeric",
+    "avg_response_secs": "numeric",
+    "intensity_7d": "numeric"
+  },
+  "feature_descriptions": {
+    "r_score": "Recency - seberapa baru customer bertransaksi (skala 0-5, lebih tinggi = lebih baru)",
+    "f_score": "Frequency - seberapa sering customer bertransaksi dalam 1 tahun terakhir (skala 0-5)",
+    "m_score": "Monetary - total nilai transaksi customer (skala 0-5, per 1 juta rupiah)",
+    "tenure_days": "Lama menjadi customer dalam hari",
+    "avg_sentiment_30": "Rata-rata sentimen pesan 30 hari terakhir (range -1 sampai 1)",
+    "neg_msg_count_30": "Jumlah pesan dengan sentimen negatif dalam 30 hari terakhir",
+    "avg_response_secs": "Rata-rata waktu respons admin dalam detik",
+    "intensity_7d": "Jumlah pesan masuk dari customer dalam 7 hari terakhir"
+  },
+  "expected_shape": 8,
+  "model_type": "XGBoost",
+  "target_variable": "is_churned",
+  "training_date": "2025-01-15",
+  "notes": "Features harus diberikan dalam urutan yang sama dengan feature_names saat inference"
+}
