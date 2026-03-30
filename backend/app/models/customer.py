@@ -1,5 +1,7 @@
 """
 Customer Model
+
+UPDATED: Relationships to new ontology tables (numeric_features, text_signals, text_semantics)
 """
 import uuid
 from datetime import datetime
@@ -19,6 +21,8 @@ class Customer(db.Model):
         city: Customer city
         consent_given: Whether customer has given data processing consent
         is_active: Whether customer is active
+        is_provisional: Whether customer was auto-created from message data
+                       Provisional customers should NOT be used for business metrics
     """
     __tablename__ = "customers"
     
@@ -33,10 +37,11 @@ class Customer(db.Model):
     city = db.Column(db.String(100), nullable=True)
     consent_given = db.Column(db.Boolean, default=False)
     is_active = db.Column(db.Boolean, default=True)
+    is_provisional = db.Column(db.Boolean, default=False, index=True)  # Ghost customer flag
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_seen_at = db.Column(db.DateTime, nullable=True)
     
-    # Relationships
+    # Relationships - Raw data
     transactions = db.relationship(
         "Transaction", 
         back_populates="customer", 
@@ -49,18 +54,34 @@ class Customer(db.Model):
         lazy="dynamic",
         cascade="all, delete-orphan"
     )
-    feedback_clean = db.relationship(
-        "FeedbackClean", 
+    feedback_features = db.relationship(
+        "FeedbackFeatures", 
         back_populates="customer", 
         lazy="dynamic",
         cascade="all, delete-orphan"
     )
-    features = db.relationship(
-        "CustomerFeature", 
+    
+    # Relationships - Feature layer (NEW ONTOLOGY)
+    numeric_features = db.relationship(
+        "CustomerNumericFeatures", 
         back_populates="customer", 
         lazy="dynamic",
         cascade="all, delete-orphan"
     )
+    text_signals = db.relationship(
+        "CustomerTextSignals", 
+        back_populates="customer", 
+        lazy="dynamic",
+        cascade="all, delete-orphan"
+    )
+    text_semantics = db.relationship(
+        "CustomerTextSemantics", 
+        back_populates="customer", 
+        lazy="dynamic",
+        cascade="all, delete-orphan"
+    )
+    
+    # Relationships - Model layer
     predictions = db.relationship(
         "ChurnPrediction", 
         back_populates="customer", 

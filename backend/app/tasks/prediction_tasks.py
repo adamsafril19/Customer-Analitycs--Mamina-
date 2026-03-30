@@ -1,9 +1,11 @@
 """
 Prediction Celery Tasks
 
+UPDATED (Milestone 3): Added compute_shap_task with shap_cache and nearest_messages
+
 Background tasks for:
 - Batch predictions
-- SHAP calculations
+- SHAP calculations with caching
 """
 import logging
 from datetime import date
@@ -26,7 +28,6 @@ def batch_predict_churn(self, customer_ids: Optional[List[str]] = None):
     Returns:
         Processing statistics
     """
-    from flask import current_app
     from app.services.ml_service import MLService
     from app.services.explainer_service import ExplainerService
     from app.services.feature_service import FeatureService
@@ -118,27 +119,34 @@ def batch_predict_churn(self, customer_ids: Optional[List[str]] = None):
         raise
 
 
-@celery_app.task(bind=True, name="prediction.calculate_shap_values")
-def calculate_shap_values(self, pred_id: str):
+@celery_app.task(bind=True, name="prediction.compute_shap_task")
+def compute_shap_task(self, pred_id: str):
     """
-    Calculate SHAP values for a specific prediction
+    Compute SHAP values with nearest messages and cache results (Milestone 3)
     
-    This is a heavy calculation that should run in background.
+    This computes:
+    - SHAP values using TreeExplainer
+    - Top reasons with formatted descriptions
+    - Nearest messages using pgvector similarity
+    
+    Results are stored in shap_cache table for quick retrieval.
     
     Args:
         pred_id: Prediction UUID
         
     Returns:
-        SHAP values and top reasons
+        Dict with shap_top and nearest_messages
     """
     from app.services.ml_service import MLService
     from app.services.explainer_service import ExplainerService
     from app.services.feature_service import FeatureService
     from app.models.prediction import ChurnPrediction
     
-    logger.info(f"Calculating SHAP values for prediction {pred_id}")
+    logger.info(f"Computing SHAP values for prediction {pred_id}")
     
     try:
+        self.update_state(state="PROGRESS", meta={"step": "loading"})
+        
         # Get prediction
         prediction = ChurnPrediction.query.get(pred_id)
         if not prediction:
@@ -151,24 +159,50 @@ def calculate_shap_values(self, pred_id: str):
         if not features:
             return {"error": "Features not found"}
         
-        # Calculate SHAP
+        self.update_state(state="PROGRESS", meta={"step": "computing_shap"})
+        
+        # Get services
         ml_service = MLService()
         explainer_service = ExplainerService(ml_service)
         
+        # Get feature vector
         feature_vector = features.to_feature_vector()
-        top_reasons = explainer_service.get_top_reasons(feature_vector, top_n=5)
         
-        # Update prediction with SHAP results
-        prediction.top_reasons = top_reasons
-        db.session.commit()
+        # Compute and cache SHAP with nearest messages
+        cache = explainer_service.compute_and_cache_shap(
+            pred_id=pred_id,
+            features=feature_vector,
+            customer_id=str(prediction.customer_id),
+            explainer_version=ml_service.get_model_version()
+        )
         
-        logger.info(f"SHAP calculation complete for {pred_id}")
+        if not cache:
+            return {"error": "Failed to compute and cache SHAP"}
+        
+        logger.info(f"SHAP computation complete for {pred_id}")
         
         return {
             "pred_id": pred_id,
-            "top_reasons": top_reasons
+            "shap_top": cache.shap_top,
+            "nearest_messages": cache.nearest_messages,
+            "computed_at": cache.computed_at.isoformat() if cache.computed_at else None
         }
         
     except Exception as e:
-        logger.error(f"SHAP calculation failed: {e}")
+        logger.error(f"SHAP computation failed: {e}")
         raise
+
+
+@celery_app.task(bind=True, name="prediction.calculate_shap_values")
+def calculate_shap_values(self, pred_id: str):
+    """
+    Legacy SHAP calculation (kept for backward compatibility)
+    
+    Args:
+        pred_id: Prediction UUID
+        
+    Returns:
+        SHAP values and top reasons
+    """
+    # Delegate to new compute_shap_task
+    return compute_shap_task(pred_id)

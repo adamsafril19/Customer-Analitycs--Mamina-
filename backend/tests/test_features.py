@@ -1,5 +1,7 @@
 """
 Feature Service Tests
+
+UPDATED: Tests for embedding-based text signal features
 """
 import pytest
 from datetime import date, datetime, timedelta
@@ -32,27 +34,19 @@ class TestFeatureService:
             # Customer was just created, tenure should be 0
             assert tenure >= 0
     
-    def test_calculate_sentiment_metrics_no_feedback(self, app, sample_customer):
-        """Test sentiment metrics with no feedback"""
+    def test_calculate_text_signal_metrics_no_feedback(self, app, sample_customer):
+        """Test text signal metrics with no feedback"""
         with app.app_context():
             from app.services.feature_service import FeatureService
             
             service = FeatureService()
-            sentiment = service._calculate_sentiment_metrics(sample_customer, date.today())
+            signals = service._calculate_text_signal_metrics(sample_customer, date.today())
             
-            assert sentiment["avg_sentiment_30"] == 0
-            assert sentiment["neg_msg_count_30"] == 0
-    
-    def test_calculate_engagement_metrics_no_data(self, app, sample_customer):
-        """Test engagement metrics with no data"""
-        with app.app_context():
-            from app.services.feature_service import FeatureService
-            
-            service = FeatureService()
-            engagement = service._calculate_engagement_metrics(sample_customer, date.today())
-            
-            assert engagement["avg_response_secs"] == 0
-            assert engagement["intensity_7d"] == 0
+            assert signals["complaint_rate_30"] == 0
+            assert signals["avg_msg_length_30"] == 0
+            assert signals["response_delay_mean"] == 0
+            assert signals["msg_count_7d"] == 0
+            assert signals["msg_volatility"] == 0
     
     def test_calculate_customer_features(self, app, sample_customer):
         """Test full feature calculation"""
@@ -88,7 +82,7 @@ class TestFeatureService:
             assert features.as_of_date == today
     
     def test_feature_vector_conversion(self, app, sample_customer):
-        """Test feature vector conversion"""
+        """Test feature vector conversion with new structure"""
         with app.app_context():
             from app.services.feature_service import FeatureService
             
@@ -98,7 +92,8 @@ class TestFeatureService:
             features = service.calculate_customer_features(sample_customer, today)
             vector = features.to_feature_vector()
             
-            assert len(vector) == 8
+            # New feature vector has 9 elements
+            assert len(vector) == 9
             assert all(isinstance(v, (int, float)) for v in vector)
 
 
@@ -126,5 +121,70 @@ class TestFeatureVectorOrder:
             # Get vector
             vector = features.to_feature_vector()
             
-            # Vector length should match feature names
+            # Vector length should match feature names (now 9)
             assert len(vector) == len(feature_names)
+            assert len(vector) == 9
+
+
+class TestEmbeddingService:
+    """Tests for Embedding Service"""
+    
+    def test_embedding_service_singleton(self, app):
+        """Test that EmbeddingService is singleton"""
+        with app.app_context():
+            from app.services.embedding_service import EmbeddingService
+            
+            service1 = EmbeddingService()
+            service2 = EmbeddingService()
+            
+            assert service1 is service2
+    
+    def test_embedding_service_properties(self, app):
+        """Test EmbeddingService properties"""
+        with app.app_context():
+            from app.services.embedding_service import EmbeddingService
+            
+            service = EmbeddingService()
+            
+            assert service.EMBEDDING_DIM == 384
+            assert "MiniLM" in service.MODEL_NAME
+
+
+class TestETLSignalExtraction:
+    """Tests for ETL Service signal extraction"""
+    
+    def test_extract_signals(self, app):
+        """Test signal extraction from text"""
+        with app.app_context():
+            from app.services.etl_service import ETLService
+            
+            service = ETLService()
+            
+            text = "Halo! Bagaimana kabar? Saya sangat senang!!"
+            signals = service._extract_signals(text)
+            
+            assert signals["msg_length"] > 0
+            assert signals["num_exclamations"] == 3  # Two !!
+            assert signals["num_questions"] == 1
+    
+    def test_detect_complaint(self, app):
+        """Test complaint detection"""
+        with app.app_context():
+            from app.services.etl_service import ETLService
+            
+            service = ETLService()
+            
+            assert service._detect_complaint("Saya sangat kecewa dengan layanan ini")
+            assert service._detect_complaint("Pelayanannya buruk sekali")
+            assert not service._detect_complaint("Terima kasih, pelayanan bagus")
+    
+    def test_detect_refund_request(self, app):
+        """Test refund request detection"""
+        with app.app_context():
+            from app.services.etl_service import ETLService
+            
+            service = ETLService()
+            
+            assert service._detect_refund_request("Tolong refund uang saya")
+            assert service._detect_refund_request("Saya mau cancel booking")
+            assert not service._detect_refund_request("Mau booking untuk besok")

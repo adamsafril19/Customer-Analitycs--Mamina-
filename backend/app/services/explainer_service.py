@@ -1,25 +1,35 @@
 """
 SHAP Explainer Service
 
-Provides interpretability for ML predictions using SHAP values.
-Heavy calculations should be run as background jobs.
+UPDATED (Milestone 3): Added nearest-message drilldown and shap_cache storage
+- Calculate SHAP values for predictions
+- Find nearest messages using pgvector similarity
+- Cache results in shap_cache table
 """
 import logging
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
+from sqlalchemy.exc import IntegrityError
+
 import numpy as np
-from flask import current_app
+from sqlalchemy import text
+
+from app import db
+from app.models.topic import ShapCache
+from app.models.feedback import FeedbackFeatures
 
 logger = logging.getLogger(__name__)
 
 
 class ExplainerService:
     """
-    SHAP Explainability Service
+    SHAP Explainability Service with Nearest-Message Drilldown
     
     Responsibilities:
     - Calculate SHAP values for predictions
     - Extract top contributing features
-    - Provide human-readable explanations
+    - Find nearest messages using embedding similarity
+    - Cache results in shap_cache table
     
     Note: Heavy SHAP calculations should be done in background jobs.
     """
@@ -44,17 +54,31 @@ class ExplainerService:
         """
         Calculate SHAP values for a single prediction
         
+        SCHEMA BOUND: Validates feature count matches model expectation.
+        
         Args:
-            features: Feature values
+            features: Feature values (must match model schema)
             
         Returns:
             SHAP values array or None if SHAP is not available
+            
+        Raises:
+            ValueError: If feature length doesn't match model schema
         """
         ml_service = self._get_ml_service()
         
         if ml_service.shap_explainer is None:
             logger.warning("SHAP explainer not loaded, cannot calculate SHAP values")
             return None
+        
+        # SCHEMA GUARD: Validate feature count matches model
+        expected_count = ml_service.feature_metadata.get("expected_shape", 13)
+        if len(features) != expected_count:
+            raise ValueError(
+                f"Feature count mismatch: got {len(features)}, "
+                f"model expects {expected_count}. "
+                f"Schema hash: {ml_service.feature_schema_hash}"
+            )
         
         try:
             features_array = np.array(features).reshape(1, -1)
@@ -102,15 +126,22 @@ class ExplainerService:
         feature_names = ml_service.get_feature_names()
         feature_descriptions = ml_service.feature_metadata.get("feature_descriptions", {})
         
+        # ORDER VALIDATION: Ensure all arrays match length
+        if not (len(feature_names) == len(features) == len(shap_values)):
+            logger.error(
+                f"Length mismatch: names={len(feature_names)}, "
+                f"features={len(features)}, shap={len(shap_values)}"
+            )
+            return self._get_fallback_reasons(features, top_n)
+        
         # Create list of (index, shap_value, feature_value)
         feature_impacts = []
         for i, (shap_val, feat_val) in enumerate(zip(shap_values, features)):
-            if i < len(feature_names):
-                feature_impacts.append({
-                    "feature": feature_names[i],
-                    "shap_value": float(shap_val),
-                    "feature_value": float(feat_val)
-                })
+            feature_impacts.append({
+                "feature": feature_names[i],
+                "shap_value": float(shap_val),
+                "feature_value": float(feat_val)
+            })
         
         # Sort by absolute SHAP value
         feature_impacts.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
@@ -145,6 +176,207 @@ class ExplainerService:
         
         return top_reasons
     
+    def get_nearest_messages(
+        self,
+        customer_id: str,
+        query_embedding: Optional[List[float]] = None,
+        top_n: int = 5,
+        as_of: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find nearest messages using pgvector similarity (Milestone 3)
+        
+        TEMPORAL SAFE: Only considers messages that existed at as_of time.
+        TRUST AWARE: Only considers verified/probable feedback.
+        
+        Args:
+            customer_id: Customer UUID
+            query_embedding: Query embedding (if None, uses last message embedding)
+            top_n: Number of messages to return
+            as_of: Temporal anchor (defaults to now)
+            
+        Returns:
+            List of nearest messages with text snippets
+        """
+        try:
+            # Temporal anchor
+            if as_of is None:
+                as_of = datetime.utcnow()
+            
+            # If no query embedding, get customer's last message embedding
+            if query_embedding is None:
+                from app.models.feedback import FeedbackLinked
+                
+                last_msg = db.session.query(FeedbackFeatures).join(
+                    FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+                ).filter(
+                    FeedbackLinked.customer_id == customer_id,
+                    FeedbackLinked.link_status.in_(['verified', 'probable']),
+                    FeedbackFeatures.embedding.isnot(None),
+                    FeedbackFeatures.processed_at <= as_of
+                ).order_by(FeedbackFeatures.processed_at.desc()).first()
+                
+                if not last_msg or last_msg.embedding is None:
+                    logger.warning(f"No embedding found for customer {customer_id}")
+                    return []
+                
+                query_embedding = list(last_msg.embedding)
+            
+            # Use pgvector cosine distance operator
+            # Note: <-> is L2, <=> is cosine distance (0-2), <#> is inner product
+            embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+            
+            # FIXED: Add link_status filter, temporal anchor, and link_id for provenance
+            sql = text("""
+                SELECT 
+                    ff.feature_id,
+                    ff.link_id,
+                    ff.msg_id,
+                    fr.text,
+                    fr.timestamp,
+                    ff.sentiment_label,
+                    ff.topic_id,
+                    fl.link_status,
+                    ff.embedding <=> :query_embedding::vector AS distance
+                FROM feedback_features ff
+                JOIN feedback_raw fr ON ff.msg_id = fr.msg_id
+                JOIN feedback_linked fl ON ff.link_id = fl.link_id
+                WHERE fl.customer_id = :customer_id
+                  AND fl.link_status IN ('verified', 'probable')
+                  AND ff.embedding IS NOT NULL
+                  AND ff.processed_at <= :as_of
+                ORDER BY ff.embedding <=> :query_embedding::vector
+                LIMIT :limit
+            """)
+            
+            result = db.session.execute(sql, {
+                "customer_id": customer_id,
+                "query_embedding": embedding_str,
+                "as_of": as_of,
+                "limit": top_n
+            })
+            
+            messages = []
+            for row in result:
+                # Truncate text for privacy
+                text_snippet = row.text[:200] + "..." if len(row.text) > 200 else row.text
+                
+                # FIXED: Correct similarity formula
+                # Cosine distance ∈ [0, 2], convert to similarity ∈ [0, 1]
+                similarity = max(0.0, 1 - (row.distance / 2))
+                
+                # EPISTEMOLOGICAL FIX: Include IDs for provenance/audit
+                messages.append({
+                    # PROOF OF PROVENANCE - these IDs allow audit
+                    "feedback_id": str(row.feature_id),  # Original feature_id
+                    "link_id": str(row.link_id),  # Link for traceability
+                    "msg_id": str(row.msg_id),
+                    # Content
+                    "text_snippet": text_snippet,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "sentiment_label": row.sentiment_label,
+                    "topic_id": str(row.topic_id) if row.topic_id else None,
+                    "link_status": row.link_status,
+                    "similarity_score": round(similarity, 4),
+                    # SEMANTIC DRIFT WARNING
+                    "interpretation": "semantic_similarity_not_causal"
+                })
+            
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Error finding nearest messages: {e}")
+            return []
+    
+    def compute_and_cache_shap(
+        self,
+        pred_id: str,
+        features: List[float],
+        customer_id: str,
+        as_of: Optional[datetime] = None,
+        explainer_version: Optional[str] = None
+    ) -> Optional[ShapCache]:
+        """
+        Compute SHAP values and cache results (for Celery task)
+        
+        TEMPORAL SAFE: Uses as_of for nearest message lookup.
+        SCHEMA BOUND: Stores feature_schema_hash for validation.
+        
+        Args:
+            pred_id: Prediction UUID
+            features: Feature values
+            customer_id: Customer UUID
+            as_of: Temporal anchor (should match prediction time)
+            explainer_version: Version string
+            
+        Returns:
+            ShapCache object or None
+        """
+        try:
+            if as_of is None:
+                as_of = datetime.utcnow()
+            
+            ml_service = self._get_ml_service()
+            
+            # Calculate SHAP
+            shap_values = self.calculate_shap_values(features)
+            
+            # Determine explanation type
+            if shap_values is not None:
+                top_reasons = self.get_top_reasons(features, shap_values)
+                explanation_type = "shap"
+            else:
+                top_reasons = self._get_fallback_reasons(features, 5)
+                explanation_type = "heuristic"
+            
+            # Get nearest messages with temporal anchor
+            nearest_messages = self.get_nearest_messages(customer_id, as_of=as_of)
+            
+            # RACE CONDITION SAFE: Use upsert pattern
+            try:
+                existing = ShapCache.query.filter_by(pred_id=pred_id).first()
+                
+                if existing:
+                    cache = existing
+                else:
+                    cache = ShapCache(pred_id=pred_id)
+                    db.session.add(cache)
+                
+                cache.shap_top = top_reasons
+                # NOTE: nearest_messages = semantic similarity, NOT causal attribution
+                cache.nearest_messages = nearest_messages
+                cache.computed_at = datetime.utcnow()
+                cache.explainer_version = explainer_version or "unknown"
+                
+                # SCHEMA BINDING for reproducibility validation
+                cache.feature_schema_hash = ml_service.feature_schema_hash
+                cache.model_version = ml_service.model_version
+                cache.explanation_type = explanation_type
+                cache.as_of = as_of
+                
+                db.session.commit()
+                
+                logger.info(f"Cached {explanation_type} explanation for prediction {pred_id}")
+                return cache
+                
+            except IntegrityError:
+                # Race condition: another worker inserted first
+                db.session.rollback()
+                logger.warning(f"SHAP cache race condition for {pred_id}, fetching existing")
+                return ShapCache.query.filter_by(pred_id=pred_id).first()
+            
+        except Exception as e:
+            logger.error(f"Error caching SHAP: {e}")
+            db.session.rollback()
+            return None
+    
+    def get_cached_shap(self, pred_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached SHAP results if available"""
+        cache = ShapCache.query.filter_by(pred_id=pred_id).first()
+        if cache:
+            return cache.to_dict()
+        return None
+    
     def _get_fallback_reasons(
         self, 
         features: List[float], 
@@ -153,35 +385,43 @@ class ExplainerService:
         """
         Fallback when SHAP is not available
         Uses feature values and domain knowledge to estimate importance
+        
+        NOTE: explanation_type will be 'heuristic' not 'shap'
         """
         ml_service = self._get_ml_service()
         feature_names = ml_service.get_feature_names()
         feature_descriptions = ml_service.feature_metadata.get("feature_descriptions", {})
         
-        # Define which features indicate higher churn risk
-        # Positive impact = increases churn probability
+        # Risk indicators aligned with FEATURE_SCHEMA
+        # Names MUST match FeatureService.FEATURE_SCHEMA exactly
         risk_indicators = {
-            "r_score": lambda x: -x,  # Lower recency = higher risk
-            "f_score": lambda x: -x,  # Lower frequency = higher risk
-            "m_score": lambda x: -x,  # Lower monetary = higher risk
-            "tenure_days": lambda x: -x,  # Shorter tenure = higher risk
-            "avg_sentiment_30": lambda x: -x,  # Negative sentiment = higher risk
-            "neg_msg_count_30": lambda x: x,  # More negative messages = higher risk
-            "avg_response_secs": lambda x: x,  # Slower response = higher risk
-            "intensity_7d": lambda x: -x,  # Less engagement = higher risk
+            "recency_days": lambda x: x / 30,  # Higher recency = higher risk
+            "tx_count_30d": lambda x: -x,  # Lower tx count = higher risk
+            "tx_count_90d": lambda x: -x / 3,  # Lower tx count = higher risk
+            "spend_30d": lambda x: -x / 100000,  # Lower spend = higher risk
+            "spend_90d": lambda x: -x / 300000,  # Lower spend = higher risk
+            "avg_tx_value": lambda x: -x / 50000,  # Lower avg = higher risk
+            "tenure_days": lambda x: -x / 365,  # Shorter tenure = higher risk
+            "msg_count_7d": lambda x: -x / 10,  # Less engagement = higher risk
+            "msg_count_30d": lambda x: -x / 30,  # Less engagement = higher risk
+            "msg_volatility": lambda x: x,  # Higher volatility = higher risk
+            "avg_msg_length_30d": lambda x: 0,  # Neutral
+            "complaint_rate_30d": lambda x: x * 5,  # More complaints = higher risk
+            "response_delay_mean": lambda x: x / 3600,  # Slower response = higher risk
         }
         
         impacts = []
         for i, (name, value) in enumerate(zip(feature_names, features)):
+            value = float(value) if isinstance(value, (int, float)) else 0
             if name in risk_indicators:
-                impact = risk_indicators[name](value) / 10  # Normalize
+                impact = risk_indicators[name](value)
             else:
                 impact = 0
             
             impacts.append({
                 "feature": name,
                 "impact": round(impact, 4),
-                "value": round(value, 4) if isinstance(value, (int, float)) else value,
+                "value": round(value, 4),
                 "description": feature_descriptions.get(name, self._get_default_description(name))
             })
         
@@ -191,16 +431,24 @@ class ExplainerService:
         return impacts[:top_n]
     
     def _get_default_description(self, feature_name: str) -> str:
-        """Get default description for feature"""
+        """
+        Get default description for feature
+        Names MUST match FeatureService.FEATURE_SCHEMA exactly
+        """
         descriptions = {
-            "r_score": "Recency - waktu sejak transaksi terakhir",
-            "f_score": "Frequency - frekuensi transaksi",
-            "m_score": "Monetary - total nilai transaksi",
+            "recency_days": "Hari sejak transaksi terakhir",
+            "tx_count_30d": "Jumlah transaksi 30 hari terakhir",
+            "tx_count_90d": "Jumlah transaksi 90 hari terakhir",
+            "spend_30d": "Total belanja 30 hari terakhir",
+            "spend_90d": "Total belanja 90 hari terakhir",
+            "avg_tx_value": "Rata-rata nilai transaksi",
             "tenure_days": "Lama menjadi customer",
-            "avg_sentiment_30": "Rata-rata sentimen 30 hari terakhir",
-            "neg_msg_count_30": "Jumlah pesan negatif 30 hari terakhir",
-            "avg_response_secs": "Rata-rata waktu respons admin",
-            "intensity_7d": "Intensitas komunikasi 7 hari terakhir"
+            "msg_count_7d": "Jumlah pesan 7 hari terakhir",
+            "msg_count_30d": "Jumlah pesan 30 hari terakhir",
+            "msg_volatility": "Volatilitas pola pesan",
+            "avg_msg_length_30d": "Rata-rata panjang pesan",
+            "complaint_rate_30d": "Rasio komplain 30 hari terakhir",
+            "response_delay_mean": "Rata-rata waktu respons admin"
         }
         return descriptions.get(feature_name, feature_name)
     
@@ -213,50 +461,59 @@ class ExplainerService:
     ) -> str:
         """
         Format description with directional context
-        
-        Args:
-            feature_name: Name of feature
-            shap_value: SHAP value (positive = increases churn)
-            feature_value: Actual feature value
-            base_description: Base description
-            
-        Returns:
-            Formatted description
+        Names MUST match FeatureService.FEATURE_SCHEMA exactly
         """
-        # Determine direction
         direction = "meningkatkan" if shap_value > 0 else "menurunkan"
         
-        # Feature-specific formatting
-        if feature_name == "avg_sentiment_30":
-            if feature_value < -0.2:
-                return f"Sentimen sangat negatif ({direction} risiko churn)"
-            elif feature_value < 0:
-                return f"Sentimen cenderung negatif ({direction} risiko churn)"
+        # Feature-specific formatting (aligned with FEATURE_SCHEMA)
+        if feature_name == "complaint_rate_30d":
+            if feature_value > 0.3:
+                return f"Tingkat komplain tinggi ({direction} risiko churn)"
+            elif feature_value > 0.1:
+                return f"Beberapa komplain ({direction} risiko churn)"
             else:
-                return f"Sentimen positif ({direction} risiko churn)"
+                return f"Sedikit/tanpa komplain ({direction} risiko churn)"
         
-        elif feature_name == "f_score":
+        elif feature_name == "tx_count_30d":
             if shap_value > 0:
-                return f"Frekuensi kunjungan menurun ({direction} risiko churn)"
+                return f"Transaksi menurun ({direction} risiko churn)"
             else:
-                return f"Frekuensi kunjungan stabil ({direction} risiko churn)"
+                return f"Transaksi stabil/meningkat ({direction} risiko churn)"
         
-        elif feature_name == "r_score":
+        elif feature_name == "recency_days":
             if shap_value > 0:
-                return f"Sudah lama tidak berkunjung ({direction} risiko churn)"
+                return f"Sudah lama tidak bertransaksi ({direction} risiko churn)"
             else:
-                return f"Baru saja berkunjung ({direction} risiko churn)"
+                return f"Baru saja bertransaksi ({direction} risiko churn)"
         
-        elif feature_name == "avg_response_secs":
+        elif feature_name == "response_delay_mean":
             if shap_value > 0:
                 return f"Waktu respons admin lambat ({direction} risiko churn)"
             else:
                 return f"Waktu respons admin cepat ({direction} risiko churn)"
         
-        elif feature_name == "neg_msg_count_30":
+        elif feature_name == "msg_count_7d":
             if shap_value > 0:
-                return f"Banyak komplain ({direction} risiko churn)"
+                return f"Komunikasi menurun ({direction} risiko churn)"
             else:
-                return f"Sedikit komplain ({direction} risiko churn)"
+                return f"Aktif berkomunikasi ({direction} risiko churn)"
+        
+        elif feature_name == "msg_volatility":
+            if shap_value > 0:
+                return f"Pola komunikasi tidak stabil ({direction} risiko churn)"
+            else:
+                return f"Pola komunikasi konsisten ({direction} risiko churn)"
+        
+        elif feature_name == "spend_30d":
+            if shap_value > 0:
+                return f"Belanja menurun ({direction} risiko churn)"
+            else:
+                return f"Belanja stabil/meningkat ({direction} risiko churn)"
+        
+        elif feature_name == "tenure_days":
+            if shap_value > 0:
+                return f"Customer baru (tenure pendek) ({direction} risiko churn)"
+            else:
+                return f"Customer loyal (tenure panjang) ({direction} risiko churn)"
         
         return f"{base_description} ({direction} risiko churn)"

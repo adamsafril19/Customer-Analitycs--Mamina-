@@ -140,6 +140,8 @@ def register_blueprints(app: Flask) -> None:
     from app.routes.customers import customers_bp
     from app.routes.actions import actions_bp
     from app.routes.admin import admin_bp
+    from app.routes.dashboard import dashboard_bp
+    from app.routes.topics import topics_bp
     
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -147,6 +149,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(customers_bp, url_prefix="/api")
     app.register_blueprint(actions_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
+    app.register_blueprint(dashboard_bp, url_prefix="/api")
+    app.register_blueprint(topics_bp, url_prefix="/api")
 
 
 def register_error_handlers(app: Flask) -> None:

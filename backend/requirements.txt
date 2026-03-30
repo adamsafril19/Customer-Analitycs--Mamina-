@@ -11,6 +11,7 @@ flasgger>=0.9.7
 psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.23
 alembic>=1.13.1
+pgvector>=0.2.0
 
 # Celery & Redis
 celery>=5.3.4
@@ -24,11 +25,17 @@ numpy>=1.26.0
 pandas>=2.1.0
 joblib>=1.3.0
 
-# NLP & Sentiment
-# NLP & Sentiment
+# NLP & Embeddings (UPDATED for semantic layer)
+sentence-transformers>=2.2.0
+transformers>=4.35.0
+langdetect>=1.0.9
 nltk>=3.8.1
-textblob>=0.17.1
 Sastrawi>=1.0.1
+
+# Topic Modeling & Clustering
+bertopic>=0.15.0
+hdbscan>=0.8.33
+umap-learn>=0.5.4
 
 # Explainability
 shap>=0.44.0

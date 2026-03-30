@@ -1,37 +1,41 @@
 {
-  "feature_names": [
-    "r_score",
-    "f_score",
-    "m_score",
-    "tenure_days",
-    "avg_sentiment_30",
-    "neg_msg_count_30",
-    "avg_response_secs",
-    "intensity_7d"
-  ],
-  "feature_types": {
-    "r_score": "numeric",
-    "f_score": "numeric",
-    "m_score": "numeric",
-    "tenure_days": "numeric",
-    "avg_sentiment_30": "numeric",
-    "neg_msg_count_30": "numeric",
-    "avg_response_secs": "numeric",
-    "intensity_7d": "numeric"
-  },
-  "feature_descriptions": {
-    "r_score": "Recency - seberapa baru customer bertransaksi (skala 0-5, lebih tinggi = lebih baru)",
-    "f_score": "Frequency - seberapa sering customer bertransaksi dalam 1 tahun terakhir (skala 0-5)",
-    "m_score": "Monetary - total nilai transaksi customer (skala 0-5, per 1 juta rupiah)",
-    "tenure_days": "Lama menjadi customer dalam hari",
-    "avg_sentiment_30": "Rata-rata sentimen pesan 30 hari terakhir (range -1 sampai 1)",
-    "neg_msg_count_30": "Jumlah pesan dengan sentimen negatif dalam 30 hari terakhir",
-    "avg_response_secs": "Rata-rata waktu respons admin dalam detik",
-    "intensity_7d": "Jumlah pesan masuk dari customer dalam 7 hari terakhir"
-  },
-  "expected_shape": 8,
-  "model_type": "XGBoost",
-  "target_variable": "is_churned",
-  "training_date": "2025-01-15",
-  "notes": "Features harus diberikan dalam urutan yang sama dengan feature_names saat inference"
+    "feature_names": [
+        "r_score",
+        "f_score",
+        "m_score",
+        "tenure_days",
+        "msg_count_7d",
+        "msg_count_30d",
+        "msg_volatility",
+        "avg_msg_length_30d",
+        "complaint_rate_30d",
+        "response_delay_mean"
+    ],
+    "feature_types": {
+        "r_score": "numeric",
+        "f_score": "numeric",
+        "m_score": "numeric",
+        "tenure_days": "numeric",
+        "msg_count_7d": "numeric",
+        "msg_count_30d": "numeric",
+        "msg_volatility": "numeric",
+        "avg_msg_length_30d": "numeric",
+        "complaint_rate_30d": "numeric",
+        "response_delay_mean": "numeric"
+    },
+    "feature_descriptions": {
+        "r_score": "Recency - seberapa baru customer bertransaksi (0-5)",
+        "f_score": "Frequency - seberapa sering customer bertransaksi (0-5)",
+        "m_score": "Monetary - total nilai transaksi customer (0-5)",
+        "tenure_days": "Lama menjadi customer (hari)",
+        "msg_count_7d": "Jumlah pesan 7 hari terakhir",
+        "msg_count_30d": "Jumlah pesan 30 hari terakhir",
+        "msg_volatility": "Volatilitas pola pesan harian (std dev)",
+        "avg_msg_length_30d": "Rata-rata panjang pesan 30 hari (karakter)",
+        "complaint_rate_30d": "Rasio pesan komplain dalam 30 hari (0-1)",
+        "response_delay_mean": "Rata-rata waktu respons (detik)"
+    },
+    "expected_shape": 10,
+    "model_type": "ontology_refactored",
+    "note": "ML sees ONLY numeric + text_signals, NOT semantics (topic, sentiment)"
 }

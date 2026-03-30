@@ -1,19 +1,29 @@
 """
-Feedback Models (Raw and Clean)
+Feedback Models (Raw, Linked, Features)
+
+REVISED: Proper identity resolution architecture
+
+Layer 1 - FeedbackRaw: NO customer_id (just phone_number)
+Layer 2 - FeedbackLinked: Identity resolution (phone → customer)
+Layer 3 - FeedbackFeatures: Statistical signals (after linking)
 """
 import uuid
 from datetime import datetime
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from pgvector.sqlalchemy import Vector
 from app import db
 
 
 class FeedbackRaw(db.Model):
     """
-    Raw feedback/message from WhatsApp
+    Raw WhatsApp messages - NO IDENTITY RESOLUTION HERE
+    
+    This is raw observational data from WhatsApp export.
+    Identity linking happens in FeedbackLinked.
     
     Attributes:
         msg_id: Primary key (UUID)
-        customer_id: Foreign key to customers
+        phone_number: Hashed phone number from WhatsApp
         direction: Message direction (inbound, outbound)
         text: Raw message text
         timestamp: Original message timestamp
@@ -26,32 +36,25 @@ class FeedbackRaw(db.Model):
         primary_key=True, 
         default=uuid.uuid4
     )
-    customer_id = db.Column(
-        UUID(as_uuid=True), 
-        db.ForeignKey("customers.customer_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
+    phone_number = db.Column(db.String(256), nullable=False, index=True)  # Hashed
     direction = db.Column(db.String(20), nullable=False)  # inbound, outbound
     text = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
-    raw_meta = db.Column(JSONB, nullable=True)  # Original WhatsApp metadata
+    raw_meta = db.Column(JSONB, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    customer = db.relationship("Customer", back_populates="feedback_raw")
-    feedback_clean = db.relationship(
-        "FeedbackClean", 
+    linked = db.relationship(
+        "FeedbackLinked", 
         back_populates="feedback_raw", 
         uselist=False,
         cascade="all, delete-orphan"
     )
     
     def to_dict(self) -> dict:
-        """Convert to dictionary representation"""
         return {
             "msg_id": str(self.msg_id),
-            "customer_id": str(self.customer_id),
+            "phone_number": self.phone_number[:8] + "***",  # Masked
             "direction": self.direction,
             "text": self.text,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
@@ -62,24 +65,24 @@ class FeedbackRaw(db.Model):
         return f"<FeedbackRaw {self.msg_id}>"
 
 
-class FeedbackClean(db.Model):
+class FeedbackLinked(db.Model):
     """
-    Processed/cleaned feedback with NLP features
+    Identity resolution layer
+    
+    This links raw messages to customers.
+    Stores match confidence for audit trail.
     
     Attributes:
-        feedback_id: Primary key (UUID)
-        msg_id: Foreign key to feedback_raw
-        customer_id: Foreign key to customers
-        sentiment_score: Sentiment score (-1 to 1)
-        sentiment_label: Sentiment label (positive, neutral, negative)
-        topic_labels: Array of detected topics
-        keywords_emotion: Emotion keywords with scores (JSONB)
-        response_time_secs: Time to respond in seconds
-        intensity_7d: Number of messages in last 7 days
+        link_id: Primary key
+        msg_id: FK to feedback_raw
+        customer_id: FK to customers (resolved identity)
+        match_confidence: Confidence of the linking (0-1)
+        match_method: How the linking was done (phone_exact, phone_fuzzy, manual)
+        linked_at: When the linking was performed
     """
-    __tablename__ = "feedback_clean"
+    __tablename__ = "feedback_linked"
     
-    feedback_id = db.Column(
+    link_id = db.Column(
         UUID(as_uuid=True), 
         primary_key=True, 
         default=uuid.uuid4
@@ -97,32 +100,115 @@ class FeedbackClean(db.Model):
         nullable=False,
         index=True
     )
-    sentiment_score = db.Column(db.Float, nullable=True)  # Range: -1 to 1
-    sentiment_label = db.Column(db.String(20), nullable=True)  # positive, neutral, negative
-    topic_labels = db.Column(ARRAY(db.String), nullable=True)  # Array of topics
-    keywords_emotion = db.Column(JSONB, nullable=True)  # {angry: 0.8, sad: 0.2}
+    
+    # Linking metadata
+    match_confidence = db.Column(db.Float, nullable=True, default=1.0)
+    match_method = db.Column(db.String(50), nullable=True, default="phone_exact")
+    # Link status for clearer semantics (verified, probable, provisional, rejected)
+    link_status = db.Column(db.String(20), nullable=False, default='provisional', index=True)
+    linked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    feedback_raw = db.relationship("FeedbackRaw", back_populates="linked")
+    customer = db.relationship("Customer", backref="feedback_linked")
+    features = db.relationship(
+        "FeedbackFeatures", 
+        back_populates="linked", 
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    
+    def to_dict(self) -> dict:
+        return {
+            "link_id": str(self.link_id),
+            "msg_id": str(self.msg_id),
+            "customer_id": str(self.customer_id),
+            "match_confidence": self.match_confidence,
+            "match_method": self.match_method,
+            "linked_at": self.linked_at.isoformat() if self.linked_at else None
+        }
+    
+    def __repr__(self) -> str:
+        return f"<FeedbackLinked {self.msg_id} -> {self.customer_id}>"
+
+
+class FeedbackFeatures(db.Model):
+    """
+    Extracted signals from messages (AFTER identity resolution)
+    
+    Contains both:
+    - Statistical signals (msg_length, punctuation) - safe for ML
+    - Semantic representation (embedding) - requires verified identity
+    
+    IMPORTANT: embedding is SEMANTIC (compressed meaning), not statistical.
+    """
+    __tablename__ = "feedback_features"
+    
+    feature_id = db.Column(
+        UUID(as_uuid=True), 
+        primary_key=True, 
+        default=uuid.uuid4
+    )
+    link_id = db.Column(
+        UUID(as_uuid=True), 
+        db.ForeignKey("feedback_linked.link_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    customer_id = db.Column(
+        UUID(as_uuid=True), 
+        db.ForeignKey("customers.customer_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    
+    # =========================================================================
+    # STATISTICAL SIGNALS (OK for ML)
+    # =========================================================================
+    
+    msg_length = db.Column(db.Integer, nullable=True)
+    num_exclamations = db.Column(db.Integer, nullable=True)
+    num_questions = db.Column(db.Integer, nullable=True)
+    
+    # =========================================================================
+    # SEMANTIC REPRESENTATION (requires verified identity)
+    # =========================================================================
+    
+    # Embedding = compressed meaning (NOT statistical!)
+    # Only use for verified links in ML
+    embedding = db.Column(Vector(384), nullable=True)
+    # Track model version for semantic continuity (like sentiment/topic)
+    embedding_model_version = db.Column(db.String(100), nullable=True, index=True)
+    
+    # Rule-based flags (regex patterns, NOT ML predictions)
+    has_complaint = db.Column(db.Boolean, nullable=True, default=False)
+    has_refund_request = db.Column(db.Boolean, nullable=True, default=False)
+    
+    language_confidence = db.Column(db.Float, nullable=True)
     response_time_secs = db.Column(db.Integer, nullable=True)
-    intensity_7d = db.Column(db.Integer, nullable=True)  # Messages in last 7 days
+    
     processed_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    customer = db.relationship("Customer", back_populates="feedback_clean")
-    feedback_raw = db.relationship("FeedbackRaw", back_populates="feedback_clean")
+    linked = db.relationship("FeedbackLinked", back_populates="features")
+    customer = db.relationship("Customer", back_populates="feedback_features")
     
     def to_dict(self) -> dict:
-        """Convert to dictionary representation"""
         return {
-            "feedback_id": str(self.feedback_id),
-            "msg_id": str(self.msg_id),
+            "feature_id": str(self.feature_id),
+            "link_id": str(self.link_id),
             "customer_id": str(self.customer_id),
-            "sentiment_score": self.sentiment_score,
-            "sentiment_label": self.sentiment_label,
-            "topic_labels": self.topic_labels,
-            "keywords_emotion": self.keywords_emotion,
+            "msg_length": self.msg_length,
+            "num_exclamations": self.num_exclamations,
+            "num_questions": self.num_questions,
+            "has_complaint": self.has_complaint,
+            "has_refund_request": self.has_refund_request,
+            "language_confidence": self.language_confidence,
             "response_time_secs": self.response_time_secs,
-            "intensity_7d": self.intensity_7d,
+            "has_embedding": self.embedding is not None,
             "processed_at": self.processed_at.isoformat() if self.processed_at else None
         }
     
     def __repr__(self) -> str:
-        return f"<FeedbackClean {self.feedback_id}>"
+        return f"<FeedbackFeatures {self.feature_id}>"

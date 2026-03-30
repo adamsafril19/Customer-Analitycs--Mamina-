@@ -27,6 +27,80 @@ from app.utils.validators import (
 actions_bp = Blueprint("actions", __name__)
 
 
+@actions_bp.route("/actions/customer/<customer_id>", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+@swag_from({
+    "tags": ["Actions"],
+    "summary": "Get actions for a customer",
+    "description": "Get all actions for a specific customer",
+    "security": [{"Bearer": []}],
+    "parameters": [
+        {
+            "name": "customer_id",
+            "in": "path",
+            "type": "string",
+            "required": True,
+            "description": "Customer UUID"
+        },
+        {
+            "name": "status",
+            "in": "query",
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "cancelled"]
+        },
+        {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "default": 20
+        }
+    ],
+    "responses": {
+        200: {"description": "List of actions for customer"},
+        404: {"description": "Customer not found"}
+    }
+})
+def get_actions_by_customer(customer_id: str):
+    """Get all actions for a specific customer"""
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    
+    customer_uuid = validate_uuid(customer_id, "customer_id")
+    
+    # Check customer exists
+    customer = Customer.query.get(customer_uuid)
+    if not customer:
+        raise NotFoundError(f"Customer {customer_id} not found")
+    
+    status = request.args.get("status")
+    limit = request.args.get("limit", 20, type=int)
+    
+    query = Action.query.filter_by(customer_id=customer_uuid)
+    
+    if status:
+        validate_enum(status, Action.VALID_STATUSES, "status")
+        query = query.filter_by(status=status)
+    
+    # Order by priority (high first) and due date
+    priority_order = db.case(
+        (Action.priority == "high", 1),
+        (Action.priority == "medium", 2),
+        (Action.priority == "low", 3),
+        else_=4
+    )
+    
+    actions = query.order_by(
+        priority_order,
+        Action.due_date.asc().nullslast()
+    ).limit(limit).all()
+    
+    return jsonify({
+        "customer_id": str(customer_uuid),
+        "total": len(actions),
+        "actions": [a.to_dict_with_customer() for a in actions]
+    })
+
+
 @actions_bp.route("/actions", methods=["POST"])
 @jwt_required()
 @swag_from({
