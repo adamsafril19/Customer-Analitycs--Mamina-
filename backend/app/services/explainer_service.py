@@ -394,19 +394,21 @@ class ExplainerService:
         
         # Risk indicators aligned with FEATURE_SCHEMA
         # Names MUST match FeatureService.FEATURE_SCHEMA exactly
+        # v2 FEATURE_SCHEMA aligned risk indicators
         risk_indicators = {
+            "recency_ratio": lambda x: (x - 1) * 2,  # >1 = overdue vs personal baseline
+            "frequency_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining frequency
+            "spend_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining spend
+            "msg_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining communication
+            "sentiment_trend": lambda x: -x * 3,  # Negative delta = worsening sentiment
             "recency_days": lambda x: x / 30,  # Higher recency = higher risk
-            "tx_count_30d": lambda x: -x,  # Lower tx count = higher risk
             "tx_count_90d": lambda x: -x / 3,  # Lower tx count = higher risk
-            "spend_30d": lambda x: -x / 100000,  # Lower spend = higher risk
             "spend_90d": lambda x: -x / 300000,  # Lower spend = higher risk
             "avg_tx_value": lambda x: -x / 50000,  # Lower avg = higher risk
             "tenure_days": lambda x: -x / 365,  # Shorter tenure = higher risk
-            "msg_count_7d": lambda x: -x / 10,  # Less engagement = higher risk
-            "msg_count_30d": lambda x: -x / 30,  # Less engagement = higher risk
+            "avg_sentiment_score": lambda x: -x * 2,  # Negative sentiment = higher risk
+            "complaint_ratio": lambda x: x * 5,  # More complaints = higher risk
             "msg_volatility": lambda x: x,  # Higher volatility = higher risk
-            "avg_msg_length_30d": lambda x: 0,  # Neutral
-            "complaint_rate_30d": lambda x: x * 5,  # More complaints = higher risk
             "response_delay_mean": lambda x: x / 3600,  # Slower response = higher risk
         }
         
@@ -433,22 +435,23 @@ class ExplainerService:
     def _get_default_description(self, feature_name: str) -> str:
         """
         Get default description for feature
-        Names MUST match FeatureService.FEATURE_SCHEMA exactly
+        Names MUST match FeatureService.FEATURE_SCHEMA v2 exactly
         """
         descriptions = {
+            "recency_ratio": "Rasio recency terhadap baseline personal",
+            "frequency_trend": "Tren frekuensi transaksi (30d vs prior)",
+            "spend_trend": "Tren belanja (30d vs prior)",
+            "msg_trend": "Tren komunikasi (30d vs prior)",
+            "sentiment_trend": "Perubahan sentimen (30d vs prior)",
             "recency_days": "Hari sejak transaksi terakhir",
-            "tx_count_30d": "Jumlah transaksi 30 hari terakhir",
             "tx_count_90d": "Jumlah transaksi 90 hari terakhir",
-            "spend_30d": "Total belanja 30 hari terakhir",
             "spend_90d": "Total belanja 90 hari terakhir",
             "avg_tx_value": "Rata-rata nilai transaksi",
             "tenure_days": "Lama menjadi customer",
-            "msg_count_7d": "Jumlah pesan 7 hari terakhir",
-            "msg_count_30d": "Jumlah pesan 30 hari terakhir",
+            "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
+            "complaint_ratio": "Rasio pesan komplain 30 hari",
             "msg_volatility": "Volatilitas pola pesan",
-            "avg_msg_length_30d": "Rata-rata panjang pesan",
-            "complaint_rate_30d": "Rasio komplain 30 hari terakhir",
-            "response_delay_mean": "Rata-rata waktu respons admin"
+            "response_delay_mean": "Rata-rata waktu respons admin",
         }
         return descriptions.get(feature_name, feature_name)
     
@@ -461,59 +464,86 @@ class ExplainerService:
     ) -> str:
         """
         Format description with directional context
-        Names MUST match FeatureService.FEATURE_SCHEMA exactly
+        Names MUST match FeatureService.FEATURE_SCHEMA v2 exactly
         """
         direction = "meningkatkan" if shap_value > 0 else "menurunkan"
+        risk_word = "risiko"
         
-        # Feature-specific formatting (aligned with FEATURE_SCHEMA)
-        if feature_name == "complaint_rate_30d":
-            if feature_value > 0.3:
-                return f"Tingkat komplain tinggi ({direction} risiko churn)"
-            elif feature_value > 0.1:
-                return f"Beberapa komplain ({direction} risiko churn)"
+        # === DEVIATION FEATURES ===
+        if feature_name == "recency_ratio":
+            if feature_value > 2:
+                return f"Sudah 2x lebih lama dari biasanya tidak bertransaksi ({direction} {risk_word})"
+            elif feature_value > 1:
+                return f"Lebih lama dari biasanya tidak bertransaksi ({direction} {risk_word})"
             else:
-                return f"Sedikit/tanpa komplain ({direction} risiko churn)"
+                return f"Masih dalam pola normal ({direction} {risk_word})"
         
-        elif feature_name == "tx_count_30d":
-            if shap_value > 0:
-                return f"Transaksi menurun ({direction} risiko churn)"
+        elif feature_name == "frequency_trend":
+            if feature_value < 0.5:
+                return f"Frekuensi transaksi turun drastis ({direction} {risk_word})"
+            elif feature_value < 1:
+                return f"Frekuensi transaksi menurun ({direction} {risk_word})"
             else:
-                return f"Transaksi stabil/meningkat ({direction} risiko churn)"
+                return f"Frekuensi transaksi stabil/naik ({direction} {risk_word})"
         
+        elif feature_name == "spend_trend":
+            if feature_value < 0.5:
+                return f"Belanja turun drastis ({direction} {risk_word})"
+            elif feature_value < 1:
+                return f"Belanja menurun ({direction} {risk_word})"
+            else:
+                return f"Belanja stabil/naik ({direction} {risk_word})"
+        
+        elif feature_name == "msg_trend":
+            if feature_value < 0.5:
+                return f"Komunikasi turun drastis ({direction} {risk_word})"
+            elif feature_value < 1:
+                return f"Komunikasi menurun ({direction} {risk_word})"
+            else:
+                return f"Komunikasi stabil/naik ({direction} {risk_word})"
+        
+        elif feature_name == "sentiment_trend":
+            if feature_value < -0.2:
+                return f"Sentimen memburuk signifikan ({direction} {risk_word})"
+            elif feature_value < 0:
+                return f"Sentimen sedikit menurun ({direction} {risk_word})"
+            else:
+                return f"Sentimen stabil/membaik ({direction} {risk_word})"
+        
+        # === ABSOLUTE FEATURES ===
         elif feature_name == "recency_days":
             if shap_value > 0:
-                return f"Sudah lama tidak bertransaksi ({direction} risiko churn)"
+                return f"Sudah lama tidak bertransaksi ({direction} {risk_word})"
             else:
-                return f"Baru saja bertransaksi ({direction} risiko churn)"
-        
-        elif feature_name == "response_delay_mean":
-            if shap_value > 0:
-                return f"Waktu respons admin lambat ({direction} risiko churn)"
-            else:
-                return f"Waktu respons admin cepat ({direction} risiko churn)"
-        
-        elif feature_name == "msg_count_7d":
-            if shap_value > 0:
-                return f"Komunikasi menurun ({direction} risiko churn)"
-            else:
-                return f"Aktif berkomunikasi ({direction} risiko churn)"
-        
-        elif feature_name == "msg_volatility":
-            if shap_value > 0:
-                return f"Pola komunikasi tidak stabil ({direction} risiko churn)"
-            else:
-                return f"Pola komunikasi konsisten ({direction} risiko churn)"
-        
-        elif feature_name == "spend_30d":
-            if shap_value > 0:
-                return f"Belanja menurun ({direction} risiko churn)"
-            else:
-                return f"Belanja stabil/meningkat ({direction} risiko churn)"
+                return f"Baru saja bertransaksi ({direction} {risk_word})"
         
         elif feature_name == "tenure_days":
             if shap_value > 0:
-                return f"Customer baru (tenure pendek) ({direction} risiko churn)"
+                return f"Customer baru (tenure pendek) ({direction} {risk_word})"
             else:
-                return f"Customer loyal (tenure panjang) ({direction} risiko churn)"
+                return f"Customer loyal (tenure panjang) ({direction} {risk_word})"
         
-        return f"{base_description} ({direction} risiko churn)"
+        # === NLP FEATURES ===
+        elif feature_name == "avg_sentiment_score":
+            if feature_value < -0.2:
+                return f"Sentimen negatif ({direction} {risk_word})"
+            elif feature_value > 0.2:
+                return f"Sentimen positif ({direction} {risk_word})"
+            else:
+                return f"Sentimen netral ({direction} {risk_word})"
+        
+        elif feature_name == "complaint_ratio":
+            if feature_value > 0.3:
+                return f"Tingkat komplain tinggi ({direction} {risk_word})"
+            elif feature_value > 0.1:
+                return f"Beberapa komplain ({direction} {risk_word})"
+            else:
+                return f"Sedikit/tanpa komplain ({direction} {risk_word})"
+        
+        elif feature_name == "response_delay_mean":
+            if shap_value > 0:
+                return f"Waktu respons admin lambat ({direction} {risk_word})"
+            else:
+                return f"Waktu respons admin cepat ({direction} {risk_word})"
+        
+        return f"{base_description} ({direction} {risk_word})"

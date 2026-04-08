@@ -1,19 +1,19 @@
-# 🎯 Customer Churn Model Training - Truth-Aware Version
+# 🎯 Behavioral Risk Scoring Model Training — v2.0.0
 ## Mamina Baby Spa
 
-Notebook ini diupdate untuk menggunakan **Truth Architecture** yang baru:
-- Filter hanya data dengan `link_status='verified'`
-- Menggunakan 13 features dari `FEATURE_SCHEMA`
-- Registrasi model ke `MLModelRegistry`
-- Schema hash binding untuk reproducibility
+Notebook ini menggunakan **Temporal Proxy Label** yang valid:
+- Fitur dihitung dari window **[obs_date - 90, obs_date]** (masa lalu)
+- Label ditentukan dari window **[obs_date, obs_date + 90]** (masa depan)
+- Train-test split berbasis **waktu** (bukan random)
+- Imputation dilakukan **setelah** split
+- Ablation tests untuk validasi model
 
 ---
 
 ## Cell 1: Setup & Import Libraries
 
 ```python
-# Install dependencies jika belum ada
-!pip install psycopg2-binary sqlalchemy pandas numpy scikit-learn xgboost shap matplotlib seaborn joblib
+!pip install psycopg2-binary sqlalchemy pandas numpy scikit-learn xgboost shap matplotlib seaborn joblib imbalanced-learn
 ```
 
 ---
@@ -32,69 +32,69 @@ import json
 import uuid
 warnings.filterwarnings('ignore')
 
-# Database
 from sqlalchemy import create_engine, text
-
-# ML Libraries
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedKFold
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, confusion_matrix, classification_report,
     roc_curve, precision_recall_curve
 )
 import xgboost as xgb
-
-# Explainability
 import shap
-
-# Model Persistence
 import joblib
 
 print("✅ Libraries imported successfully!")
-print(f"XGBoost version: {xgb.__version__}")
-print(f"SHAP version: {shap.__version__}")
 ```
 
 ---
 
-## Cell 3: Feature Schema Definition (CRITICAL!)
+## Cell 3: Feature Schema v2.0.0 (CRITICAL!)
 
 ```python
 # ============================================================
-# FEATURE SCHEMA - Must match FeatureService.FEATURE_SCHEMA
+# FEATURE SCHEMA v2 — Must match FeatureService.FEATURE_SCHEMA
 # ============================================================
 
-FEATURE_SCHEMA_VERSION = "v1.0.0"
+FEATURE_SCHEMA_VERSION = "v2.0.0"
 
 FEATURE_SCHEMA = [
-    ("recency_days", "numeric"),
-    ("tx_count_30d", "numeric"),
-    ("tx_count_90d", "numeric"),
-    ("spend_30d", "numeric"),
-    ("spend_90d", "numeric"),
-    ("avg_tx_value", "numeric"),
-    ("tenure_days", "numeric"),
-    ("msg_count_7d", "numeric"),
-    ("msg_count_30d", "numeric"),
-    ("msg_volatility", "numeric"),
-    ("avg_msg_length_30d", "numeric"),
-    ("complaint_rate_30d", "numeric"),
-    ("response_delay_mean", "numeric"),
+    # === DEVIATION / TREND (core behavioral change signals) ===
+    ("recency_ratio", "numeric"),       # recency_days / avg_interpurchase_days
+    ("frequency_trend", "numeric"),     # tx_count_30d / tx_count_prior_30d
+    ("spend_trend", "numeric"),         # spend_30d / spend_prior_30d
+    ("msg_trend", "numeric"),           # msg_count_30d / msg_count_prior_30d
+    ("sentiment_trend", "numeric"),     # sentiment_30d - sentiment_prior_30d
+    # === ABSOLUTE CONTEXT ===
+    ("recency_days", "numeric"),        # days since last transaction
+    ("tx_count_90d", "numeric"),        # transaction count in 90 days
+    ("spend_90d", "numeric"),           # total spending in 90 days
+    ("avg_tx_value", "numeric"),        # average transaction value
+    ("tenure_days", "numeric"),         # customer lifetime in days
+    # === NLP / COMMUNICATION ===
+    ("avg_sentiment_score", "numeric"), # mean sentiment valence 30d
+    ("complaint_ratio", "numeric"),     # complaint messages / total messages 30d
+    ("msg_volatility", "numeric"),      # std dev of daily message count
+    ("response_delay_mean", "numeric"), # mean admin response time (seconds)
 ]
 
 FEATURE_NAMES = [name for name, _ in FEATURE_SCHEMA]
 EXPECTED_FEATURE_COUNT = len(FEATURE_SCHEMA)
 
 def get_feature_schema_hash():
-    """Generate hash of feature schema for validation"""
     schema_str = json.dumps(FEATURE_SCHEMA, sort_keys=True)
     return hashlib.sha256(schema_str.encode()).hexdigest()[:16]
+
+def safe_ratio(current, prior, default=1.0, cap=10.0):
+    """Safe division for trend features."""
+    if prior == 0:
+        return default if current == 0 else cap
+    return min(cap, current / prior)
 
 print(f"📋 Feature Schema Version: {FEATURE_SCHEMA_VERSION}")
 print(f"📊 Expected Features: {EXPECTED_FEATURE_COUNT}")
 print(f"🔐 Schema Hash: {get_feature_schema_hash()}")
-print(f"\n🏷️ Feature Names:")
+print(f"\n🏷️ Features:")
 for i, name in enumerate(FEATURE_NAMES):
     print(f"  {i+1}. {name}")
 ```
@@ -104,7 +104,6 @@ for i, name in enumerate(FEATURE_NAMES):
 ## Cell 4: Database Connection
 
 ```python
-# Konfigurasi Database - sesuaikan dengan .env backend
 DB_CONFIG = {
     'host': '127.0.0.1',
     'port': 5433,
@@ -114,10 +113,8 @@ DB_CONFIG = {
 }
 
 DATABASE_URL = f"postgresql+psycopg2://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-
 engine = create_engine(DATABASE_URL)
 
-# Test connection
 try:
     with engine.connect() as conn:
         result = conn.execute(text("SELECT 1"))
@@ -128,231 +125,374 @@ except Exception as e:
 
 ---
 
-## Cell 5: Load Training Data - VERIFIED ONLY (CRITICAL!)
+## Cell 5: Generate Observation Dates & Proxy Labels (CRITICAL!)
 
 ```python
 # ============================================================
-# TRUTH-AWARE DATA LOADING
-# Only load data from VERIFIED feedback
+# TEMPORAL PROXY LABEL GENERATION
+#
+# KEY PRINCIPLE:
+#   Features = computed from data BEFORE observation_date
+#   Label = determined by behavior AFTER observation_date
+#
+# Definition:
+#   is_disengaged = TRUE if NO transaction in 90 days AFTER observation_date
+#
+# This is NOT circular because:
+#   - Features use data from [obs_date - 90, obs_date]
+#   - Label uses data from [obs_date, obs_date + 90]
+#   - These windows DO NOT OVERLAP
 # ============================================================
 
-query_training_data = """
-WITH verified_customers AS (
-    -- Only customers with at least one verified feedback
-    SELECT DISTINCT fl.customer_id
-    FROM feedback_linked fl
-    WHERE fl.link_status = 'verified'
-),
-latest_features AS (
-    -- Get only the LATEST snapshot per customer to avoid time leakage
-    SELECT 
-        c.customer_id,
-        nf.as_of_date,
-        -- Numeric features from customer_numeric_features
-        COALESCE(nf.recency_days, 999) as recency_days,
-        COALESCE(nf.tx_count_30d, 0) as tx_count_30d,
-        COALESCE(nf.tx_count_90d, 0) as tx_count_90d,
-        COALESCE(nf.spend_30d, 0) as spend_30d,
-        COALESCE(nf.spend_90d, 0) as spend_90d,
-        COALESCE(nf.avg_tx_value, 0) as avg_tx_value,
-        COALESCE(nf.tenure_days, 0) as tenure_days,
-        -- Text signals from customer_text_signals
-        COALESCE(ts.msg_count_7d, 0) as msg_count_7d,
-        COALESCE(ts.msg_count_30d, 0) as msg_count_30d,
-        COALESCE(ts.msg_volatility, 0) as msg_volatility,
-        COALESCE(ts.avg_msg_length_30d, 0) as avg_msg_length_30d,
-        COALESCE(ts.complaint_rate_30d, 0) as complaint_rate_30d,
-        COALESCE(ts.response_delay_mean, 0) as response_delay_mean,
-        -- Churn label (if exists)
-        COALESCE(cl.is_churn, FALSE) as is_churn,
-        -- Row number to get latest only
-        ROW_NUMBER() OVER (
-            PARTITION BY c.customer_id 
-            ORDER BY nf.as_of_date DESC
-        ) as rn
-    FROM verified_customers vc
-    JOIN customers c ON c.customer_id = vc.customer_id
-    LEFT JOIN customer_numeric_features nf ON c.customer_id = nf.customer_id
-    LEFT JOIN customer_text_signals ts ON c.customer_id = ts.customer_id 
-        AND nf.as_of_date = ts.as_of_date
-    LEFT JOIN churn_labels cl ON c.customer_id = cl.customer_id
-    WHERE c.is_provisional = FALSE  -- Exclude provisional customers
+# Step 1: Determine valid observation date range
+date_range_query = """
+SELECT 
+    MIN(tx_date)::date + 90 as earliest_obs_date,
+    MAX(tx_date)::date - 90 as latest_obs_date,
+    COUNT(DISTINCT customer_id) as total_customers
+FROM transactions
+WHERE status = 'completed'
+"""
+date_info = pd.read_sql(date_range_query, engine)
+print(f"📅 Earliest observation date: {date_info['earliest_obs_date'].iloc[0]}")
+print(f"📅 Latest observation date: {date_info['latest_obs_date'].iloc[0]}")
+print(f"👥 Total customers with transactions: {date_info['total_customers'].iloc[0]}")
+
+# Step 2: Create observation dates (monthly intervals)
+earliest = pd.to_datetime(date_info['earliest_obs_date'].iloc[0])
+latest = pd.to_datetime(date_info['latest_obs_date'].iloc[0])
+observation_dates = pd.date_range(start=earliest, end=latest, freq='MS')
+print(f"\n📆 Generated {len(observation_dates)} observation dates")
+for d in observation_dates:
+    print(f"  - {d.date()}")
+```
+
+---
+
+## Cell 6: Build Training Dataset with Temporal Separation
+
+```python
+# ============================================================
+# BUILD TRAINING DATA
+# For each (customer, observation_date):
+#   1. Compute features from [obs_date - 90, obs_date]
+#   2. Compute label from [obs_date, obs_date + 90]
+# ============================================================
+
+training_rows = []
+
+for obs_date in observation_dates:
+    obs_date_str = obs_date.strftime('%Y-%m-%d')
+    
+    query = text("""
+    WITH customer_pool AS (
+        -- Customers who had at least 1 transaction BEFORE obs_date
+        SELECT DISTINCT customer_id
+        FROM transactions
+        WHERE status = 'completed'
+          AND tx_date < :obs_date
+    ),
+    -- === FEATURE WINDOW: [obs_date - 90, obs_date] ===
+    tx_features AS (
+        SELECT
+            cp.customer_id,
+            -- Recency
+            EXTRACT(DAY FROM (:obs_date::timestamp - MAX(t.tx_date)))::int as recency_days,
+            -- Frequency & Monetary (current 30d)
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.tx_id END) as tx_count_30d,
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.tx_id END) as tx_count_90d,
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.amount END), 0) as spend_30d,
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.amount END), 0) as spend_90d,
+            -- Prior period (30d before that: [obs-60, obs-30])
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 60
+                        AND t.tx_date < :obs_date::date - 30 THEN t.tx_id END) as tx_count_prior_30d,
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 60
+                              AND t.tx_date < :obs_date::date - 30 THEN t.amount END), 0) as spend_prior_30d,
+            -- Avg transaction value
+            COALESCE(AVG(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.amount END), 0) as avg_tx_value
+        FROM customer_pool cp
+        LEFT JOIN transactions t ON cp.customer_id = t.customer_id
+            AND t.status = 'completed' AND t.tx_date < :obs_date
+        GROUP BY cp.customer_id
+    ),
+    -- Tenure
+    tenure AS (
+        SELECT customer_id,
+               EXTRACT(DAY FROM (:obs_date::timestamp - created_at))::int as tenure_days
+        FROM customers
+        WHERE is_provisional = FALSE
+    ),
+    -- === LABEL WINDOW: [obs_date, obs_date + 90] ===
+    -- CRITICAL: Label is from FUTURE data, completely independent from features
+    label AS (
+        SELECT
+            cp.customer_id,
+            CASE WHEN COUNT(t.tx_id) = 0 THEN 1 ELSE 0 END as is_disengaged
+        FROM customer_pool cp
+        LEFT JOIN transactions t ON cp.customer_id = t.customer_id
+            AND t.status = 'completed'
+            AND t.tx_date >= :obs_date
+            AND t.tx_date < :obs_date::date + 90
+        GROUP BY cp.customer_id
+    )
+    SELECT
+        tf.customer_id,
+        :obs_date::date as observation_date,
+        -- Deviation features
+        tf.recency_days,
+        tf.tx_count_30d,
+        tf.tx_count_90d,
+        tf.spend_30d,
+        tf.spend_90d,
+        tf.tx_count_prior_30d,
+        tf.spend_prior_30d,
+        tf.avg_tx_value,
+        tn.tenure_days,
+        -- Label (from FUTURE window)
+        lb.is_disengaged
+    FROM tx_features tf
+    JOIN tenure tn ON tf.customer_id = tn.customer_id
+    JOIN label lb ON tf.customer_id = lb.customer_id
+    WHERE tf.recency_days IS NOT NULL
+      AND tn.tenure_days > 0
+    """)
+    
+    df_obs = pd.read_sql(query, engine, params={"obs_date": obs_date_str})
+    df_obs['observation_date'] = obs_date.date()
+    training_rows.append(df_obs)
+    print(f"  📅 {obs_date.date()}: {len(df_obs)} samples, "
+          f"disengaged={df_obs['is_disengaged'].sum()}")
+
+df_raw = pd.concat(training_rows, ignore_index=True)
+print(f"\n✅ Total raw training samples: {len(df_raw)}")
+print(f"📊 Disengagement rate: {df_raw['is_disengaged'].mean()*100:.1f}%")
+```
+
+---
+
+## Cell 7: Compute Derived Features (Trends + Sentiment)
+
+```python
+# ============================================================
+# COMPUTE DEVIATION FEATURES
+# These capture behavioral CHANGE relative to personal baseline
+# ============================================================
+
+# --- Avg Interpurchase Days (per customer, all tx before obs) ---
+def compute_avg_interpurchase(customer_id, obs_date):
+    """Average gap between consecutive transactions."""
+    query = text("""
+        SELECT tx_date FROM transactions
+        WHERE customer_id = :cid AND status = 'completed'
+          AND tx_date < :obs_date
+        ORDER BY tx_date
+    """)
+    dates = pd.read_sql(query, engine, params={"cid": str(customer_id), "obs_date": str(obs_date)})
+    if len(dates) < 2:
+        return 0.0
+    gaps = dates['tx_date'].diff().dropna().dt.days
+    return float(gaps.mean()) if len(gaps) > 0 else 0.0
+
+print("⏳ Computing avg interpurchase days...")
+df_raw['avg_ipt'] = df_raw.apply(
+    lambda r: compute_avg_interpurchase(r['customer_id'], r['observation_date']), axis=1
 )
-SELECT * FROM latest_features
-WHERE rn = 1  -- Only latest snapshot per customer
-  AND recency_days IS NOT NULL
-ORDER BY customer_id
-"""
 
-df = pd.read_sql(query_training_data, engine)
+# --- Deviation/Trend Features ---
+df_raw['recency_ratio'] = df_raw.apply(
+    lambda r: safe_ratio(r['recency_days'], r['avg_ipt']), axis=1)
+df_raw['frequency_trend'] = df_raw.apply(
+    lambda r: safe_ratio(r['tx_count_30d'], r['tx_count_prior_30d']), axis=1)
+df_raw['spend_trend'] = df_raw.apply(
+    lambda r: safe_ratio(r['spend_30d'], r['spend_prior_30d']), axis=1)
 
-# Count verified feedback for each customer
-verified_count_query = """
-SELECT customer_id, COUNT(*) as verified_feedback_count
-FROM feedback_linked
-WHERE link_status = 'verified'
-GROUP BY customer_id
-"""
-df_verified = pd.read_sql(verified_count_query, engine)
-df = df.merge(df_verified, on='customer_id', how='left')
+# --- Message Features ---
+# Compute msg_count_30d, msg_count_prior_30d per (customer, obs_date)
+def compute_msg_features(customer_id, obs_date):
+    """Message counts and complaint ratio from verified feedback."""
+    query = text("""
+        SELECT
+            COUNT(CASE WHEN ff.processed_at >= :obs_date::date - 30 THEN 1 END) as msg_count_30d,
+            COUNT(CASE WHEN ff.processed_at >= :obs_date::date - 60
+                        AND ff.processed_at < :obs_date::date - 30 THEN 1 END) as msg_count_prior_30d,
+            COALESCE(AVG(CASE WHEN ff.processed_at >= :obs_date::date - 30
+                              THEN CASE WHEN ff.has_complaint THEN 1.0 ELSE 0.0 END END), 0) as complaint_ratio,
+            COALESCE(STDDEV(daily_count), 0) as msg_volatility,
+            COALESCE(AVG(CASE WHEN ff.processed_at >= :obs_date::date - 30
+                              THEN ff.response_time_secs END), 0) as response_delay_mean
+        FROM feedback_features ff
+        JOIN feedback_linked fl ON ff.link_id = fl.link_id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::float as daily_count
+            FROM feedback_features ff2
+            JOIN feedback_linked fl2 ON ff2.link_id = fl2.link_id
+            WHERE fl2.customer_id = :cid
+              AND fl2.link_status = 'verified'
+              AND ff2.processed_at >= :obs_date::date - 30
+              AND ff2.processed_at < :obs_date::date
+            GROUP BY ff2.processed_at::date
+        ) daily ON true
+        WHERE fl.customer_id = :cid
+          AND fl.link_status = 'verified'
+          AND ff.processed_at < :obs_date
+    """)
+    try:
+        result = pd.read_sql(query, engine, params={
+            "cid": str(customer_id), "obs_date": str(obs_date)
+        })
+        if len(result) > 0:
+            return result.iloc[0].to_dict()
+    except:
+        pass
+    return {
+        "msg_count_30d": 0, "msg_count_prior_30d": 0,
+        "complaint_ratio": 0.0, "msg_volatility": 0.0, "response_delay_mean": 0.0
+    }
 
-print(f"✅ Loaded {len(df)} customers with VERIFIED identity (latest snapshot only)")
-print(f"📊 Churn distribution:")
-print(df['is_churn'].value_counts())
-print(f"\n🔗 Verified feedback per customer:")
-print(df['verified_feedback_count'].describe())
-df.head()
+print("⏳ Computing message features...")
+msg_features = df_raw.apply(
+    lambda r: compute_msg_features(r['customer_id'], r['observation_date']), axis=1
+)
+msg_df = pd.DataFrame(msg_features.tolist())
+df_raw['msg_count_30d_val'] = msg_df['msg_count_30d']
+df_raw['msg_count_prior_30d'] = msg_df['msg_count_prior_30d']
+df_raw['complaint_ratio'] = msg_df['complaint_ratio']
+df_raw['msg_volatility'] = msg_df['msg_volatility']
+df_raw['response_delay_mean'] = msg_df['response_delay_mean']
+
+df_raw['msg_trend'] = df_raw.apply(
+    lambda r: safe_ratio(r['msg_count_30d_val'], r['msg_count_prior_30d']), axis=1)
+
+# --- Sentiment Features ---
+# Try from customer_text_semantics first, else default to 0
+def compute_sentiment(customer_id, obs_date):
+    """Get sentiment from pre-computed semantics table."""
+    query = text("""
+        SELECT avg_sentiment_score FROM customer_text_semantics
+        WHERE customer_id = :cid AND as_of_date <= :obs_date
+        ORDER BY as_of_date DESC LIMIT 1
+    """)
+    try:
+        result = pd.read_sql(query, engine, params={
+            "cid": str(customer_id), "obs_date": str(obs_date)
+        })
+        if len(result) > 0 and result.iloc[0]['avg_sentiment_score'] is not None:
+            current = float(result.iloc[0]['avg_sentiment_score'])
+            # Prior period
+            prior_q = text("""
+                SELECT avg_sentiment_score FROM customer_text_semantics
+                WHERE customer_id = :cid AND as_of_date <= :prior_date
+                ORDER BY as_of_date DESC LIMIT 1
+            """)
+            prior_date = str(pd.to_datetime(obs_date) - timedelta(days=30))[:10]
+            prior_r = pd.read_sql(prior_q, engine, params={
+                "cid": str(customer_id), "prior_date": prior_date
+            })
+            prior = float(prior_r.iloc[0]['avg_sentiment_score']) if len(prior_r) > 0 and prior_r.iloc[0]['avg_sentiment_score'] is not None else 0.0
+            return current, current - prior
+    except:
+        pass
+    return 0.0, 0.0
+
+print("⏳ Computing sentiment features...")
+sentiment_results = df_raw.apply(
+    lambda r: compute_sentiment(r['customer_id'], r['observation_date']), axis=1
+)
+df_raw['avg_sentiment_score'] = sentiment_results.apply(lambda x: x[0])
+df_raw['sentiment_trend'] = sentiment_results.apply(lambda x: x[1])
+
+print(f"\n✅ All features computed!")
+print(f"📊 Feature columns available: {len(df_raw.columns)}")
 ```
 
 ---
 
-## Cell 6: Validate Feature Schema
+## Cell 8: Assemble Feature Matrix (Schema-Ordered)
 
 ```python
 # ============================================================
-# VALIDATE FEATURE COUNT MATCHES SCHEMA
+# ASSEMBLE X AND y IN SCHEMA ORDER
 # ============================================================
 
-actual_features = [col for col in df.columns if col in FEATURE_NAMES]
-missing_features = [name for name in FEATURE_NAMES if name not in df.columns]
+# Build X in exact FEATURE_SCHEMA order
+X = pd.DataFrame({
+    "recency_ratio": df_raw["recency_ratio"],
+    "frequency_trend": df_raw["frequency_trend"],
+    "spend_trend": df_raw["spend_trend"],
+    "msg_trend": df_raw["msg_trend"],
+    "sentiment_trend": df_raw["sentiment_trend"],
+    "recency_days": df_raw["recency_days"].astype(float),
+    "tx_count_90d": df_raw["tx_count_90d"].astype(float),
+    "spend_90d": df_raw["spend_90d"].astype(float),
+    "avg_tx_value": df_raw["avg_tx_value"].astype(float),
+    "tenure_days": df_raw["tenure_days"].astype(float),
+    "avg_sentiment_score": df_raw["avg_sentiment_score"],
+    "complaint_ratio": df_raw["complaint_ratio"],
+    "msg_volatility": df_raw["msg_volatility"],
+    "response_delay_mean": df_raw["response_delay_mean"],
+})
 
-print(f"📋 Expected features: {EXPECTED_FEATURE_COUNT}")
-print(f"✅ Found features: {len(actual_features)}")
+y = df_raw['is_disengaged'].copy()
+obs_dates = df_raw['observation_date'].copy()
 
-if missing_features:
-    print(f"❌ MISSING FEATURES: {missing_features}")
-    raise ValueError(f"Feature schema mismatch! Missing: {missing_features}")
-else:
-    print("✅ All features present!")
-
-# Verify order
-for i, name in enumerate(FEATURE_NAMES):
-    print(f"  {i+1}. {name}: ✓")
-```
-
----
-
-## Cell 7: Define Churn Label (if not from DB)
-
-```python
-# ============================================================
-# DEFINE CHURN LABEL
-# Option 1: Use is_churn from database (if available)
-# Option 2: Create synthetic label based on business rules
-# 
-# IMPORTANT: If using synthetic labels, this is NOT predictive ML
-# It is "behavioral risk scoring" (rule compression)
-# ============================================================
-
-# Track label source for governance
-LABEL_SOURCE = None
-
-# Check if we have churn labels
-if df['is_churn'].sum() > 0:
-    print("✅ Using churn labels from database")
-    df['churn'] = df['is_churn'].astype(int)
-    LABEL_SOURCE = "database_ground_truth"
-else:
-    print("⚠️ No churn labels found - creating synthetic labels")
-    print("⚠️ WARNING: Model will learn YOUR RULES, not predict real churn!")
-    
-    def define_churn(row):
-        """
-        Define churn based on behavioral signals:
-        - High recency (long time since last transaction)
-        - Low transaction activity
-        - High complaint rate
-        
-        This is RULE COMPRESSION, not true supervised learning!
-        """
-        churn_score = 0
-        
-        # Risk factors
-        if row['recency_days'] > 60:
-            churn_score += 2
-        if row['tx_count_30d'] == 0:
-            churn_score += 2
-        if row['complaint_rate_30d'] > 0.3:
-            churn_score += 1
-        if row['msg_volatility'] > 2.0:
-            churn_score += 1
-            
-        # Protective factors
-        if row['tx_count_90d'] > 3:
-            churn_score -= 1
-        if row['spend_90d'] > 500000:
-            churn_score -= 1
-            
-        return 1 if churn_score >= 2 else 0
-    
-    df['churn'] = df.apply(define_churn, axis=1)
-    LABEL_SOURCE = "synthetic_rule_v1"
-
-print(f"\n📊 Churn Distribution:")
-print(df['churn'].value_counts())
-print(f"Churn Rate: {df['churn'].mean()*100:.2f}%")
-print(f"\n🏷️ Label Source: {LABEL_SOURCE}")
-if LABEL_SOURCE == "synthetic_rule_v1":
-    print("⚠️ Model is a BEHAVIORAL RISK SCORER, not churn predictor!")
-```
-
----
-
-## Cell 8: Prepare Features
-
-```python
-# ============================================================
-# PREPARE FEATURE MATRIX
-# Order MUST match FEATURE_SCHEMA
-# ============================================================
-
-X = df[FEATURE_NAMES].copy()
-y = df['churn'].copy()
-
-# Store customer IDs for provenance
-customer_ids = df['customer_id'].tolist()
+assert list(X.columns) == FEATURE_NAMES, "Feature order mismatch!"
+assert X.shape[1] == EXPECTED_FEATURE_COUNT, f"Expected {EXPECTED_FEATURE_COUNT}, got {X.shape[1]}"
 
 print(f"📊 Feature Matrix: {X.shape}")
 print(f"🎯 Target: {y.shape}")
-print(f"✅ Feature order matches FEATURE_SCHEMA: {list(X.columns) == FEATURE_NAMES}")
-
-# Handle missing values
-print(f"\n❓ Missing values:")
-print(X.isnull().sum())
-
-for col in X.columns:
-    if X[col].isnull().sum() > 0:
-        X[col].fillna(X[col].median(), inplace=True)
+print(f"✅ Feature order matches FEATURE_SCHEMA: True")
+print(f"\n📊 Disengagement rate: {y.mean()*100:.1f}%")
+print(f"\n❓ Missing values:\n{X.isnull().sum()}")
 ```
 
 ---
 
-## Cell 9: Train-Test Split
+## Cell 9: TIME-BASED Train-Test Split (CRITICAL!)
 
 ```python
 # ============================================================
-# TRAIN-TEST SPLIT
+# TIME-BASED SPLIT (NOT random!)
+#
+# Training: earlier observation dates
+# Test: later observation dates
+#
+# This simulates real-world usage: train on past, predict future
 # ============================================================
 
-if len(X) < 20:
-    print("⚠️ Dataset kecil - menggunakan split tanpa stratify")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, 
-        test_size=0.3,
-        random_state=42
-    )
-else:
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, 
-        test_size=0.2, 
-        random_state=42,
-        stratify=y
-    )
+# Sort by observation_date
+sort_idx = obs_dates.argsort()
+X = X.iloc[sort_idx].reset_index(drop=True)
+y = y.iloc[sort_idx].reset_index(drop=True)
+obs_dates_sorted = obs_dates.iloc[sort_idx].reset_index(drop=True)
 
-print(f"📚 Training set: {X_train.shape[0]} samples")
-print(f"🧪 Test set: {X_test.shape[0]} samples")
-print(f"\n📈 Training churn rate: {y_train.mean()*100:.2f}%")
-print(f"📉 Test churn rate: {y_test.mean()*100:.2f}%")
+# Split at 80th percentile of time
+cutoff_idx = int(len(X) * 0.8)
+cutoff_date = obs_dates_sorted.iloc[cutoff_idx]
+
+X_train = X.iloc[:cutoff_idx].copy()
+X_test = X.iloc[cutoff_idx:].copy()
+y_train = y.iloc[:cutoff_idx].copy()
+y_test = y.iloc[cutoff_idx:].copy()
+
+print(f"📅 Time-based split cutoff: {cutoff_date}")
+print(f"📚 Training set: {X_train.shape[0]} samples (before {cutoff_date})")
+print(f"🧪 Test set: {X_test.shape[0]} samples (from {cutoff_date} onward)")
+print(f"\n📈 Training disengagement rate: {y_train.mean()*100:.1f}%")
+print(f"📉 Test disengagement rate: {y_test.mean()*100:.1f}%")
+
+# ============================================================
+# IMPUTATION — AFTER SPLIT, FIT ON TRAINING ONLY
+# ============================================================
+from sklearn.impute import SimpleImputer
+
+imputer = SimpleImputer(strategy='median')
+X_train_cols = X_train.columns
+X_train = pd.DataFrame(imputer.fit_transform(X_train), columns=X_train_cols)
+X_test = pd.DataFrame(imputer.transform(X_test), columns=X_train_cols)
+
+print(f"\n✅ Imputation done (fit on training only)")
+print(f"❓ Remaining NaN in train: {X_train.isnull().sum().sum()}")
+print(f"❓ Remaining NaN in test: {X_test.isnull().sum().sum()}")
 ```
 
 ---
@@ -360,10 +500,6 @@ print(f"📉 Test churn rate: {y_test.mean()*100:.2f}%")
 ## Cell 9.5: Handle Imbalanced Data (SMOTE)
 
 ```python
-# ============================================================
-# ADAPTIVE IMBALANCE HANDLING
-# SMOTE (Synthetic Minority Over-sampling Technique)
-# ============================================================
 from imblearn.over_sampling import SMOTE
 
 churn_count = (y_train == 1).sum()
@@ -371,61 +507,33 @@ non_churn_count = (y_train == 0).sum()
 churn_ratio = churn_count / len(y_train)
 
 print("📊 Imbalance Analysis:")
-print(f"   Total training samples: {len(y_train)}")
-print(f"   Non-churn (0): {non_churn_count} ({non_churn_count/len(y_train):.1%})")
-print(f"   Churn (1): {churn_count} ({churn_ratio:.1%})")
-print(f"   Imbalance ratio: {non_churn_count/max(churn_count,1):.1f}:1")
+print(f"   Non-disengaged (0): {non_churn_count} ({non_churn_count/len(y_train):.1%})")
+print(f"   Disengaged (1): {churn_count} ({churn_ratio:.1%})")
 
-# Store original for comparison
 X_train_original = X_train.copy()
 y_train_original = y_train.copy()
-
-# Decision logic based on dataset analysis
 USE_SMOTE = False
 
 if churn_count < 10:
-    print("\n⚠️ Too few churn samples for SMOTE (<10)")
-    print("   Using scale_pos_weight only in XGBoost")
-    
-elif churn_ratio < 0.20:  # < 20% minority = imbalanced
-    print("\n✅ Applying SMOTE (churn < 20%)...")
-    
-    # k_neighbors must be < minority samples
+    print("\n⚠️ Too few positive samples for SMOTE (<10)")
+elif churn_ratio < 0.20:
+    print("\n✅ Applying SMOTE...")
     k = min(5, churn_count - 1)
-    print(f"   k_neighbors = {k}")
-    
     smote = SMOTE(random_state=42, k_neighbors=k)
     X_train, y_train = smote.fit_resample(X_train, y_train)
     USE_SMOTE = True
-    
-    print(f"\n📊 After SMOTE:")
-    print(f"   Total samples: {len(y_train)}")
-    print(f"   Non-churn (0): {(y_train == 0).sum()}")
-    print(f"   Churn (1): {(y_train == 1).sum()}")
-    print(f"   Synthetic samples added: {len(y_train) - len(y_train_original)}")
-    
+    print(f"   After SMOTE: {len(y_train)} samples")
 else:
-    print("\n✅ Data relatively balanced (churn >= 20%)")
-    print("   No SMOTE needed")
+    print("\n✅ Data balanced enough, no SMOTE needed")
 
-# Track for provenance
 SMOTE_APPLIED = USE_SMOTE
-print(f"\n🏷️ SMOTE Applied: {SMOTE_APPLIED}")
 ```
-
-> **Note:** SMOTE hanya diaplikasikan ke **training set**, TIDAK ke test set.
-> Perlu install: `pip install imbalanced-learn`
 
 ---
 
 ## Cell 10: Train XGBoost Model
 
 ```python
-# ============================================================
-# TRAIN XGBOOST MODEL
-# ============================================================
-
-# Calculate class weights for imbalanced data
 scale_pos_weight = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
 
 xgb_model = xgb.XGBClassifier(
@@ -441,11 +549,9 @@ xgb_model = xgb.XGBClassifier(
 print("🚀 Training XGBoost model...")
 xgb_model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
 
-# Predictions
 y_pred = xgb_model.predict(X_test)
 y_pred_proba = xgb_model.predict_proba(X_test)[:, 1]
-
-print("✅ Model trained successfully!")
+print("✅ Model trained!")
 ```
 
 ---
@@ -453,10 +559,6 @@ print("✅ Model trained successfully!")
 ## Cell 11: Model Evaluation
 
 ```python
-# ============================================================
-# MODEL EVALUATION
-# ============================================================
-
 print("📊 Model Performance:\n")
 print(f"Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
 print(f"Precision: {precision_score(y_test, y_pred, zero_division=0):.4f}")
@@ -467,14 +569,14 @@ if len(np.unique(y_test)) > 1:
     print(f"ROC-AUC:   {roc_auc_score(y_test, y_pred_proba):.4f}")
 
 print("\n📋 Classification Report:")
-print(classification_report(y_test, y_pred, target_names=['Active', 'Churned'], zero_division=0))
+print(classification_report(y_test, y_pred,
+    target_names=['Active', 'Disengaged'], zero_division=0))
 
-# Confusion Matrix
 plt.figure(figsize=(8, 6))
 cm = confusion_matrix(y_test, y_pred)
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-            xticklabels=['Active', 'Churned'],
-            yticklabels=['Active', 'Churned'])
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Active', 'Disengaged'],
+            yticklabels=['Active', 'Disengaged'])
 plt.title('Confusion Matrix')
 plt.ylabel('Actual')
 plt.xlabel('Predicted')
@@ -486,10 +588,6 @@ plt.show()
 ## Cell 12: Feature Importance
 
 ```python
-# ============================================================
-# FEATURE IMPORTANCE
-# ============================================================
-
 importance_df = pd.DataFrame({
     'feature': FEATURE_NAMES,
     'importance': xgb_model.feature_importances_
@@ -497,14 +595,80 @@ importance_df = pd.DataFrame({
 
 plt.figure(figsize=(10, 8))
 sns.barplot(data=importance_df, x='importance', y='feature', palette='viridis')
-plt.title('Feature Importance (XGBoost)')
+plt.title('Feature Importance (XGBoost v2)')
 plt.xlabel('Importance Score')
 plt.tight_layout()
 plt.show()
 
-print("🏆 Top 5 Most Important Features:")
-for i, row in importance_df.head(5).iterrows():
+print("🏆 Top 5 Features:")
+for _, row in importance_df.head(5).iterrows():
     print(f"  {row['feature']}: {row['importance']:.4f}")
+```
+
+---
+
+## Cell 12.5: 🧪 ABLATION TESTS (Model Validation)
+
+```python
+# ============================================================
+# ABLATION TESTS — Verify model is NOT a rule approximator
+# ============================================================
+
+print("=" * 60)
+print("🧪 ABLATION TESTS")
+print("=" * 60)
+
+# --- Test 1: Drop recency_ratio, check AUC drop ---
+print("\n📊 Test 1: Model WITHOUT recency_ratio")
+drop_cols_1 = ['recency_ratio', 'recency_days']
+X_train_no_rec = X_train.drop(columns=drop_cols_1, errors='ignore')
+X_test_no_rec = X_test.drop(columns=drop_cols_1, errors='ignore')
+
+model_no_rec = xgb.XGBClassifier(
+    n_estimators=100, max_depth=4, learning_rate=0.1,
+    scale_pos_weight=scale_pos_weight, random_state=42,
+    use_label_encoder=False, eval_metric='logloss'
+)
+model_no_rec.fit(X_train_no_rec, y_train, verbose=False)
+pred_no_rec = model_no_rec.predict_proba(X_test_no_rec)[:, 1]
+
+if len(np.unique(y_test)) > 1:
+    auc_full = roc_auc_score(y_test, y_pred_proba)
+    auc_no_rec = roc_auc_score(y_test, pred_no_rec)
+    auc_drop = (auc_full - auc_no_rec) / auc_full * 100
+    print(f"   Full model AUC: {auc_full:.4f}")
+    print(f"   Without recency AUC: {auc_no_rec:.4f}")
+    print(f"   AUC drop: {auc_drop:.1f}%")
+    if auc_drop > 20:
+        print(f"   ⚠️ WARNING: Model too dependent on recency ({auc_drop:.0f}% drop)")
+    else:
+        print(f"   ✅ Model survives without recency (only {auc_drop:.0f}% drop)")
+
+# --- Test 2: Feature concentration (Gini) ---
+print("\n📊 Test 2: Feature Importance Concentration")
+importances = xgb_model.feature_importances_
+normalized = importances / importances.sum()
+gini = 1 - sum(n**2 for n in normalized)
+print(f"   Gini index: {gini:.3f} (0=single feature dominant, 1=perfectly spread)")
+if gini < 0.3:
+    print(f"   ⚠️ WARNING: Features too concentrated (Gini={gini:.2f})")
+else:
+    print(f"   ✅ Feature importance well distributed")
+
+# --- Test 3: NLP feature contribution ---
+print("\n📊 Test 3: NLP Feature Contribution")
+nlp_features = ['avg_sentiment_score', 'sentiment_trend', 'complaint_ratio']
+nlp_importance = sum(importance_df[importance_df['feature'].isin(nlp_features)]['importance'])
+total_importance = importance_df['importance'].sum()
+nlp_pct = nlp_importance / total_importance * 100 if total_importance > 0 else 0
+print(f"   NLP features: {nlp_features}")
+print(f"   NLP contribution: {nlp_pct:.1f}%")
+if nlp_pct < 5:
+    print(f"   ⚠️ NLP features contribute <5% — consider if they add value")
+else:
+    print(f"   ✅ NLP features contribute {nlp_pct:.1f}%")
+
+print("\n" + "=" * 60)
 ```
 
 ---
@@ -512,168 +676,92 @@ for i, row in importance_df.head(5).iterrows():
 ## Cell 13: SHAP Explainer
 
 ```python
-# ============================================================
-# SHAP EXPLAINABILITY
-# ============================================================
-
 print("🔍 Creating SHAP explainer...")
 explainer = shap.TreeExplainer(xgb_model)
 shap_values_raw = explainer.shap_values(X_test)
 
-# CRITICAL: Handle different SHAP output formats
-# XGBoost binary classifier can return list[2] or array depending on version
 if isinstance(shap_values_raw, list):
-    print(f"📦 SHAP returned list of length {len(shap_values_raw)}")
-    # For binary classification, use positive class (index 1)
     shap_values = shap_values_raw[1] if len(shap_values_raw) > 1 else shap_values_raw[0]
 else:
-    print(f"📦 SHAP returned array of shape {shap_values_raw.shape}")
     shap_values = shap_values_raw
 
-print(f"✅ SHAP values shape: {shap_values.shape}")
-print(f"✅ Expected shape: ({len(X_test)}, {EXPECTED_FEATURE_COUNT})")
-
-# Validate shape matches
 assert shap_values.shape[1] == EXPECTED_FEATURE_COUNT, "SHAP feature count mismatch!"
 
-# Summary plot
 plt.figure(figsize=(12, 8))
 shap.summary_plot(shap_values, X_test, feature_names=FEATURE_NAMES, show=False)
-plt.title('SHAP Feature Impact')
+plt.title('SHAP Feature Impact (v2 Risk Scoring)')
 plt.tight_layout()
 plt.show()
-
-print("✅ SHAP explainer created successfully!")
 ```
 
 ---
 
-## Cell 14: Save Model & Artifacts (CRITICAL!)
+## Cell 14: Save Model & Artifacts
 
 ```python
-# ============================================================
-# SAVE MODEL WITH PROVENANCE
-# ============================================================
-import os
+import os, pickle
 
-MODEL_VERSION = "v1.0.0"
+MODEL_VERSION = "v2.0.0"
 SAVE_DIR = "../backend/ml_models"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# Generate model hash
 model_bytes = pickle.dumps(xgb_model)
 model_hash = hashlib.sha256(model_bytes).hexdigest()[:16]
-
-# Generate SHAP hash
 shap_bytes = pickle.dumps(explainer)
 shap_hash = hashlib.sha256(shap_bytes).hexdigest()[:16]
 
-# Feature metadata
 feature_metadata = {
     "feature_names": FEATURE_NAMES,
     "expected_shape": EXPECTED_FEATURE_COUNT,
     "feature_schema": FEATURE_SCHEMA,
     "feature_schema_hash": get_feature_schema_hash(),
     "feature_descriptions": {
-        "recency_days": "Days since last transaction",
-        "tx_count_30d": "Transaction count in last 30 days",
-        "tx_count_90d": "Transaction count in last 90 days",
-        "spend_30d": "Total spending in last 30 days",
-        "spend_90d": "Total spending in last 90 days",
-        "avg_tx_value": "Average transaction value",
-        "tenure_days": "Customer tenure in days",
-        "msg_count_7d": "Message count in last 7 days",
-        "msg_count_30d": "Message count in last 30 days",
-        "msg_volatility": "Std dev of daily message count",
-        "avg_msg_length_30d": "Average message length",
-        "complaint_rate_30d": "Complaint rate in last 30 days",
-        "response_delay_mean": "Mean response time in seconds"
+        "recency_ratio": "Rasio recency terhadap baseline personal",
+        "frequency_trend": "Tren frekuensi transaksi (30d vs prior 30d)",
+        "spend_trend": "Tren belanja (30d vs prior 30d)",
+        "msg_trend": "Tren komunikasi (30d vs prior 30d)",
+        "sentiment_trend": "Perubahan sentimen (30d vs prior 30d)",
+        "recency_days": "Hari sejak transaksi terakhir",
+        "tx_count_90d": "Jumlah transaksi 90 hari",
+        "spend_90d": "Total belanja 90 hari",
+        "avg_tx_value": "Rata-rata nilai transaksi",
+        "tenure_days": "Lama menjadi customer (hari)",
+        "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
+        "complaint_ratio": "Rasio pesan komplain 30 hari",
+        "msg_volatility": "Volatilitas pola pesan",
+        "response_delay_mean": "Rata-rata waktu respons admin",
     }
 }
 
 # Save artifacts
 joblib.dump(xgb_model, f"{SAVE_DIR}/churn_model.joblib")
 joblib.dump(explainer, f"{SAVE_DIR}/shap_explainer.joblib")
-joblib.dump(feature_metadata, f"{SAVE_DIR}/feature_metadata.joblib")
+
+# Save imputer for inference
+joblib.dump(imputer, f"{SAVE_DIR}/imputer.joblib")
+
+# Save feature metadata as JSON
+with open(f"{SAVE_DIR}/feature_metadata.json", 'w') as f:
+    json.dump(feature_metadata, f, indent=2)
 
 print("✅ Model artifacts saved:")
 print(f"  📦 Model: {SAVE_DIR}/churn_model.joblib")
 print(f"  🔍 SHAP: {SAVE_DIR}/shap_explainer.joblib")
-print(f"  📋 Metadata: {SAVE_DIR}/feature_metadata.joblib")
-print(f"\n🔐 Hashes:")
-print(f"  Model: {model_hash}")
-print(f"  SHAP: {shap_hash}")
-print(f"  Schema: {get_feature_schema_hash()}")
-```
-
----
-
-## Cell 15: Register to MLModelRegistry
-
-```python
-# ============================================================
-# REGISTER MODEL TO DATABASE
-# ============================================================
-
-registry_entry = {
-    "model_name": "churn_xgboost",
-    "model_version": MODEL_VERSION,
-    "model_hash": model_hash,
-    "feature_schema_hash": get_feature_schema_hash(),
-    "feature_names": FEATURE_NAMES,
-    "expected_feature_count": EXPECTED_FEATURE_COUNT,
-    "shap_explainer_hash": shap_hash,
-    "training_data_count": len(y_train_original),  # Original count before SMOTE
-    "training_data_count_after_smote": len(y_train) if SMOTE_APPLIED else None,
-    "smote_applied": SMOTE_APPLIED,
-    "trained_on_link_status": "verified",
-    "label_source": LABEL_SOURCE,  # CRITICAL: Track synthetic vs ground truth
-    "training_date": datetime.utcnow().isoformat(),
-    "is_active": True,
-    "notes": f"Truth-aware training. Label: {LABEL_SOURCE}. SMOTE: {SMOTE_APPLIED}"
-}
-
-# Insert to database
-insert_query = text("""
-    INSERT INTO ml_model_registry (
-        model_name, model_version, model_hash, feature_schema_hash,
-        feature_names, expected_feature_count, shap_explainer_hash,
-        training_data_count, trained_on_link_status, training_date,
-        is_active, notes
-    ) VALUES (
-        :model_name, :model_version, :model_hash, :feature_schema_hash,
-        :feature_names, :expected_feature_count, :shap_explainer_hash,
-        :training_data_count, :trained_on_link_status, :training_date,
-        :is_active, :notes
-    )
-    ON CONFLICT (model_hash) DO UPDATE SET
-        is_active = EXCLUDED.is_active,
-        notes = EXCLUDED.notes
-""")
-
-try:
-    with engine.connect() as conn:
-        conn.execute(insert_query, {
-            **registry_entry,
-            "feature_names": json.dumps(FEATURE_NAMES)
-        })
-        conn.commit()
-    print("✅ Model registered to MLModelRegistry!")
-except Exception as e:
-    print(f"⚠️ Registry insert failed (may already exist): {e}")
-
-print(f"\n📋 Registry Entry:")
-for k, v in registry_entry.items():
-    print(f"  {k}: {v}")
+print(f"  📋 Metadata: {SAVE_DIR}/feature_metadata.json")
+print(f"  🔧 Imputer: {SAVE_DIR}/imputer.joblib")
+print(f"\n🔐 Model hash: {model_hash}")
+print(f"🔐 Schema hash: {get_feature_schema_hash()}")
 ```
 
 ---
 
 ## Summary
 
-Dengan notebook ini, model yang ditraining akan:
-1. ✅ Hanya menggunakan data dari **verified feedback**
-2. ✅ Menggunakan **13 features** sesuai `FEATURE_SCHEMA`
-3. ✅ Menyimpan **schema hash** untuk validasi
-4. ✅ Terdaftar di **MLModelRegistry** untuk governance
-5. ✅ Memiliki **SHAP explainer** yang terikat dengan model
+Dengan training guide v2 ini:
+1. ✅ **Label temporal** — fitur dari masa lalu, label dari masa depan
+2. ✅ **Fitur deviasi** — recency_ratio, frequency_trend, spend_trend, msg_trend
+3. ✅ **Sentiment features** — avg_sentiment_score, sentiment_trend
+4. ✅ **Time-based split** — train pada data awal, test pada data akhir
+5. ✅ **Imputation setelah split** — fit pada training saja
+6. ✅ **Ablation tests** — validasi model bukan rule approximator
+7. ✅ **14 features** sesuai FEATURE_SCHEMA v2.0.0
