@@ -392,20 +392,31 @@ class ExplainerService:
         feature_names = ml_service.get_feature_names()
         feature_descriptions = ml_service.feature_metadata.get("feature_descriptions", {})
         
-        # Risk indicators aligned with FEATURE_SCHEMA
+        # Risk indicators aligned with FEATURE_SCHEMA v3
         # Names MUST match FeatureService.FEATURE_SCHEMA exactly
-        # v2 FEATURE_SCHEMA aligned risk indicators
         risk_indicators = {
+            # Trend
             "recency_ratio": lambda x: (x - 1) * 2,  # >1 = overdue vs personal baseline
-            "frequency_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining frequency
-            "spend_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining spend
-            "msg_trend": lambda x: -(1 - min(x, 2)),  # <1 = declining communication
+            "frequency_trend_smoothed": lambda x: -x * 2,  # negative slope = declining
+            "spend_trend_smoothed": lambda x: -x * 2,  # negative slope = declining
+            "msg_trend_smoothed": lambda x: -x * 2,  # negative slope = declining
             "sentiment_trend": lambda x: -x * 3,  # Negative delta = worsening sentiment
+            # Context
             "recency_days": lambda x: x / 30,  # Higher recency = higher risk
             "tx_count_90d": lambda x: -x / 3,  # Lower tx count = higher risk
             "spend_90d": lambda x: -x / 300000,  # Lower spend = higher risk
             "avg_tx_value": lambda x: -x / 50000,  # Lower avg = higher risk
             "tenure_days": lambda x: -x / 365,  # Shorter tenure = higher risk
+            # Magnitude
+            "activity_mean": lambda x: -x / 3,  # Lower mean activity = higher risk
+            "recent_activity_avg": lambda x: -x / 3,  # Lower recent = higher risk
+            # Volatility
+            "activity_std": lambda x: x,  # Higher std = less stable = higher risk
+            "activity_cv": lambda x: x * 2,  # Higher CV = more volatile = higher risk
+            "spend_volatility_cv": lambda x: x * 2,  # Volatile spending = higher risk
+            # Interaction
+            "trend_magnitude_interaction": lambda x: -x,  # Negative = declining active user
+            # NLP
             "avg_sentiment_score": lambda x: -x * 2,  # Negative sentiment = higher risk
             "complaint_ratio": lambda x: x * 5,  # More complaints = higher risk
             "msg_volatility": lambda x: x,  # Higher volatility = higher risk
@@ -435,19 +446,31 @@ class ExplainerService:
     def _get_default_description(self, feature_name: str) -> str:
         """
         Get default description for feature
-        Names MUST match FeatureService.FEATURE_SCHEMA v2 exactly
+        Names MUST match FeatureService.FEATURE_SCHEMA v3 exactly
         """
         descriptions = {
+            # Trend
             "recency_ratio": "Rasio recency terhadap baseline personal",
-            "frequency_trend": "Tren frekuensi transaksi (30d vs prior)",
-            "spend_trend": "Tren belanja (30d vs prior)",
-            "msg_trend": "Tren komunikasi (30d vs prior)",
+            "frequency_trend_smoothed": "Tren frekuensi transaksi (smoothed slope)",
+            "spend_trend_smoothed": "Tren belanja (smoothed slope)",
+            "msg_trend_smoothed": "Tren komunikasi (smoothed slope)",
             "sentiment_trend": "Perubahan sentimen (30d vs prior)",
+            # Context
             "recency_days": "Hari sejak transaksi terakhir",
             "tx_count_90d": "Jumlah transaksi 90 hari terakhir",
             "spend_90d": "Total belanja 90 hari terakhir",
             "avg_tx_value": "Rata-rata nilai transaksi",
             "tenure_days": "Lama menjadi customer",
+            # Magnitude
+            "activity_mean": "Rata-rata aktivitas per periode",
+            "recent_activity_avg": "Aktivitas pada periode terkini",
+            # Volatility
+            "activity_std": "Standar deviasi aktivitas antar periode",
+            "activity_cv": "Koefisien variasi aktivitas (stabilitas relatif)",
+            "spend_volatility_cv": "Koefisien variasi belanja (stabilitas belanja)",
+            # Interaction
+            "trend_magnitude_interaction": "Interaksi tren × tingkat aktivitas",
+            # NLP
             "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
             "complaint_ratio": "Rasio pesan komplain 30 hari",
             "msg_volatility": "Volatilitas pola pesan",
@@ -464,12 +487,12 @@ class ExplainerService:
     ) -> str:
         """
         Format description with directional context
-        Names MUST match FeatureService.FEATURE_SCHEMA v2 exactly
+        Names MUST match FeatureService.FEATURE_SCHEMA v3 exactly
         """
         direction = "meningkatkan" if shap_value > 0 else "menurunkan"
         risk_word = "risiko"
         
-        # === DEVIATION FEATURES ===
+        # === TREND FEATURES ===
         if feature_name == "recency_ratio":
             if feature_value > 2:
                 return f"Sudah 2x lebih lama dari biasanya tidak bertransaksi ({direction} {risk_word})"
@@ -478,29 +501,29 @@ class ExplainerService:
             else:
                 return f"Masih dalam pola normal ({direction} {risk_word})"
         
-        elif feature_name == "frequency_trend":
-            if feature_value < 0.5:
-                return f"Frekuensi transaksi turun drastis ({direction} {risk_word})"
-            elif feature_value < 1:
-                return f"Frekuensi transaksi menurun ({direction} {risk_word})"
+        elif feature_name == "frequency_trend_smoothed":
+            if feature_value < -0.5:
+                return f"Tren frekuensi transaksi turun tajam ({direction} {risk_word})"
+            elif feature_value < 0:
+                return f"Tren frekuensi transaksi menurun ({direction} {risk_word})"
             else:
-                return f"Frekuensi transaksi stabil/naik ({direction} {risk_word})"
+                return f"Tren frekuensi transaksi stabil/naik ({direction} {risk_word})"
         
-        elif feature_name == "spend_trend":
-            if feature_value < 0.5:
-                return f"Belanja turun drastis ({direction} {risk_word})"
-            elif feature_value < 1:
-                return f"Belanja menurun ({direction} {risk_word})"
+        elif feature_name == "spend_trend_smoothed":
+            if feature_value < -0.5:
+                return f"Tren belanja turun tajam ({direction} {risk_word})"
+            elif feature_value < 0:
+                return f"Tren belanja menurun ({direction} {risk_word})"
             else:
-                return f"Belanja stabil/naik ({direction} {risk_word})"
+                return f"Tren belanja stabil/naik ({direction} {risk_word})"
         
-        elif feature_name == "msg_trend":
-            if feature_value < 0.5:
-                return f"Komunikasi turun drastis ({direction} {risk_word})"
-            elif feature_value < 1:
-                return f"Komunikasi menurun ({direction} {risk_word})"
+        elif feature_name == "msg_trend_smoothed":
+            if feature_value < -0.5:
+                return f"Tren komunikasi turun tajam ({direction} {risk_word})"
+            elif feature_value < 0:
+                return f"Tren komunikasi menurun ({direction} {risk_word})"
             else:
-                return f"Komunikasi stabil/naik ({direction} {risk_word})"
+                return f"Tren komunikasi stabil/naik ({direction} {risk_word})"
         
         elif feature_name == "sentiment_trend":
             if feature_value < -0.2:
@@ -510,7 +533,7 @@ class ExplainerService:
             else:
                 return f"Sentimen stabil/membaik ({direction} {risk_word})"
         
-        # === ABSOLUTE FEATURES ===
+        # === ABSOLUTE CONTEXT FEATURES ===
         elif feature_name == "recency_days":
             if shap_value > 0:
                 return f"Sudah lama tidak bertransaksi ({direction} {risk_word})"
@@ -522,6 +545,57 @@ class ExplainerService:
                 return f"Customer baru (tenure pendek) ({direction} {risk_word})"
             else:
                 return f"Customer loyal (tenure panjang) ({direction} {risk_word})"
+        
+        # === MAGNITUDE FEATURES ===
+        elif feature_name == "activity_mean":
+            if feature_value < 1:
+                return f"Aktivitas sangat rendah ({direction} {risk_word})"
+            elif feature_value < 3:
+                return f"Aktivitas sedang ({direction} {risk_word})"
+            else:
+                return f"Aktivitas tinggi ({direction} {risk_word})"
+        
+        elif feature_name == "recent_activity_avg":
+            if feature_value == 0:
+                return f"Tidak ada aktivitas terkini ({direction} {risk_word})"
+            elif feature_value < 2:
+                return f"Aktivitas terkini rendah ({direction} {risk_word})"
+            else:
+                return f"Aktivitas terkini aktif ({direction} {risk_word})"
+        
+        # === VOLATILITY FEATURES ===
+        elif feature_name == "activity_std":
+            if feature_value > 2:
+                return f"Pola aktivitas sangat tidak stabil ({direction} {risk_word})"
+            elif feature_value > 0.5:
+                return f"Pola aktivitas fluktuatif ({direction} {risk_word})"
+            else:
+                return f"Pola aktivitas stabil ({direction} {risk_word})"
+        
+        elif feature_name == "activity_cv":
+            if feature_value > 1:
+                return f"Volatilitas aktivitas tinggi ({direction} {risk_word})"
+            elif feature_value > 0.5:
+                return f"Volatilitas aktivitas sedang ({direction} {risk_word})"
+            else:
+                return f"Aktivitas konsisten ({direction} {risk_word})"
+        
+        elif feature_name == "spend_volatility_cv":
+            if feature_value > 1:
+                return f"Pola belanja sangat volatile ({direction} {risk_word})"
+            elif feature_value > 0.5:
+                return f"Pola belanja cukup volatile ({direction} {risk_word})"
+            else:
+                return f"Pola belanja konsisten ({direction} {risk_word})"
+        
+        # === INTERACTION FEATURES ===
+        elif feature_name == "trend_magnitude_interaction":
+            if feature_value < -1:
+                return f"Customer aktif dengan tren menurun tajam ({direction} {risk_word})"
+            elif feature_value < 0:
+                return f"Tren menurun pada customer aktif ({direction} {risk_word})"
+            else:
+                return f"Interaksi tren-aktivitas positif ({direction} {risk_word})"
         
         # === NLP FEATURES ===
         elif feature_name == "avg_sentiment_score":

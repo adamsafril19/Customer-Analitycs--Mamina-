@@ -43,33 +43,64 @@ from app.models.topic import ModelVersion
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Feature configuration (10 features: 4 numeric + 6 text signals)
+# Feature configuration (20 features: v3.0.0 schema)
+# Must match FeatureService.FEATURE_SCHEMA exactly
 FEATURE_NAMES = [
-    # Numeric (from transactions)
-    "r_score",
-    "f_score",
-    "m_score",
+    # === TREND (smoothed, de-noised) ===
+    "recency_ratio",
+    "frequency_trend_smoothed",
+    "spend_trend_smoothed",
+    "msg_trend_smoothed",
+    "sentiment_trend",
+    # === ABSOLUTE CONTEXT ===
+    "recency_days",
+    "tx_count_90d",
+    "spend_90d",
+    "avg_tx_value",
     "tenure_days",
-    # Text signals (from communication behavior)
-    "msg_count_7d",
-    "msg_count_30d",
+    # === MAGNITUDE ===
+    "activity_mean",
+    "recent_activity_avg",
+    # === VOLATILITY ===
+    "activity_std",
+    "activity_cv",
+    "spend_volatility_cv",
+    # === INTERACTION ===
+    "trend_magnitude_interaction",
+    # === NLP / COMMUNICATION ===
+    "avg_sentiment_score",
+    "complaint_ratio",
     "msg_volatility",
-    "avg_msg_length_30d",
-    "complaint_rate_30d",
-    "response_delay_mean"
+    "response_delay_mean",
 ]
 
 FEATURE_DESCRIPTIONS = {
-    "r_score": "Recency - seberapa baru customer bertransaksi (0-5)",
-    "f_score": "Frequency - seberapa sering customer bertransaksi (0-5)",
-    "m_score": "Monetary - total nilai transaksi customer (0-5)",
+    # Trend
+    "recency_ratio": "Rasio recency terhadap baseline personal (recency_days / avg_ipt)",
+    "frequency_trend_smoothed": "Slope tren frekuensi transaksi (smoothed, de-noised)",
+    "spend_trend_smoothed": "Slope tren belanja (smoothed, de-noised)",
+    "msg_trend_smoothed": "Slope tren komunikasi (smoothed, de-noised)",
+    "sentiment_trend": "Perubahan sentimen (30d - prior_30d)",
+    # Context
+    "recency_days": "Hari sejak transaksi terakhir",
+    "tx_count_90d": "Jumlah transaksi dalam 90 hari",
+    "spend_90d": "Total belanja dalam 90 hari",
+    "avg_tx_value": "Rata-rata nilai transaksi (spend_90d / tx_count_90d)",
     "tenure_days": "Lama menjadi customer (hari)",
-    "msg_count_7d": "Jumlah pesan 7 hari terakhir",
-    "msg_count_30d": "Jumlah pesan 30 hari terakhir",
+    # Magnitude
+    "activity_mean": "Rata-rata tx count per window (3 windows × 30d)",
+    "recent_activity_avg": "Tx count di window terkini (30d terakhir)",
+    # Volatility
+    "activity_std": "Standar deviasi tx count antar window",
+    "activity_cv": "Koefisien variasi aktivitas (std/mean, capped, zero-safe)",
+    "spend_volatility_cv": "Koefisien variasi belanja antar window",
+    # Interaction
+    "trend_magnitude_interaction": "frequency_trend_smoothed × activity_mean",
+    # NLP
+    "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
+    "complaint_ratio": "Rasio pesan komplain 30 hari (0-1)",
     "msg_volatility": "Volatilitas pola pesan harian (std dev)",
-    "avg_msg_length_30d": "Rata-rata panjang pesan 30 hari (karakter)",
-    "complaint_rate_30d": "Rasio pesan komplain dalam 30 hari (0-1)",
-    "response_delay_mean": "Rata-rata waktu respons (detik)"
+    "response_delay_mean": "Rata-rata waktu respons admin (detik)",
 }
 
 

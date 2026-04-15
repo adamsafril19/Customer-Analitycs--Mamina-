@@ -1,11 +1,12 @@
-# 🎯 Behavioral Risk Scoring Model Training — v2.0.0
+# 🎯 Behavioral Risk Scoring Model Training — v3.0.0
 ## Mamina Baby Spa
 
-Notebook ini menggunakan **Temporal Proxy Label** yang valid:
+Notebook ini menggunakan **Temporal Proxy Label** yang valid + **Enhanced Feature Engineering**:
 - Fitur dihitung dari window **[obs_date - 90, obs_date]** (masa lalu)
 - Label ditentukan dari window **[obs_date, obs_date + 90]** (masa depan)
 - Train-test split berbasis **waktu** (bukan random)
 - Imputation dilakukan **setelah** split
+- **NEW v3**: Smoothed trends, magnitude features, volatility features, interaction features
 - Ablation tests untuk validasi model
 
 ---
@@ -49,33 +50,53 @@ print("✅ Libraries imported successfully!")
 
 ---
 
-## Cell 3: Feature Schema v2.0.0 (CRITICAL!)
+## Cell 3: Feature Schema v3.0.0 (CRITICAL!) + Configuration
 
 ```python
 # ============================================================
-# FEATURE SCHEMA v2 — Must match FeatureService.FEATURE_SCHEMA
+# FEATURE SCHEMA v3 — Must match FeatureService.FEATURE_SCHEMA
 # ============================================================
 
-FEATURE_SCHEMA_VERSION = "v2.0.0"
+FEATURE_SCHEMA_VERSION = "v3.0.0"
+
+# === CONFIGURABLE PARAMETERS (same as FeatureConfig in backend) ===
+SMOOTHING_METHOD = "sma"       # "sma" or "ema"
+SMOOTHING_WINDOW = 3           # Window size for smoothing
+EMA_ALPHA = None               # If None, computed as 2/(window+1)
+ACTIVITY_WINDOWS = 3           # Number of 30d windows
+WINDOW_SIZE_DAYS = 30          # Size of each window
+MIN_ACTIVITY_THRESHOLD = 0.01  # Floor for CV denominator
+CV_CAP = 10.0                  # Cap for coefficient of variation
+RATIO_CAP = 10.0               # Cap for safe ratio
+RATIO_DEFAULT = 1.0            # Default when both num & denom are zero
 
 FEATURE_SCHEMA = [
-    # === DEVIATION / TREND (core behavioral change signals) ===
-    ("recency_ratio", "numeric"),       # recency_days / avg_interpurchase_days
-    ("frequency_trend", "numeric"),     # tx_count_30d / tx_count_prior_30d
-    ("spend_trend", "numeric"),         # spend_30d / spend_prior_30d
-    ("msg_trend", "numeric"),           # msg_count_30d / msg_count_prior_30d
-    ("sentiment_trend", "numeric"),     # sentiment_30d - sentiment_prior_30d
+    # === TREND (smoothed, de-noised) ===
+    ("recency_ratio", "numeric"),
+    ("frequency_trend_smoothed", "numeric"),
+    ("spend_trend_smoothed", "numeric"),
+    ("msg_trend_smoothed", "numeric"),
+    ("sentiment_trend", "numeric"),
     # === ABSOLUTE CONTEXT ===
-    ("recency_days", "numeric"),        # days since last transaction
-    ("tx_count_90d", "numeric"),        # transaction count in 90 days
-    ("spend_90d", "numeric"),           # total spending in 90 days
-    ("avg_tx_value", "numeric"),        # average transaction value
-    ("tenure_days", "numeric"),         # customer lifetime in days
+    ("recency_days", "numeric"),
+    ("tx_count_90d", "numeric"),
+    ("spend_90d", "numeric"),
+    ("avg_tx_value", "numeric"),
+    ("tenure_days", "numeric"),
+    # === MAGNITUDE ===
+    ("activity_mean", "numeric"),
+    ("recent_activity_avg", "numeric"),
+    # === VOLATILITY ===
+    ("activity_std", "numeric"),
+    ("activity_cv", "numeric"),
+    ("spend_volatility_cv", "numeric"),
+    # === INTERACTION ===
+    ("trend_magnitude_interaction", "numeric"),
     # === NLP / COMMUNICATION ===
-    ("avg_sentiment_score", "numeric"), # mean sentiment valence 30d
-    ("complaint_ratio", "numeric"),     # complaint messages / total messages 30d
-    ("msg_volatility", "numeric"),      # std dev of daily message count
-    ("response_delay_mean", "numeric"), # mean admin response time (seconds)
+    ("avg_sentiment_score", "numeric"),
+    ("complaint_ratio", "numeric"),
+    ("msg_volatility", "numeric"),
+    ("response_delay_mean", "numeric"),
 ]
 
 FEATURE_NAMES = [name for name, _ in FEATURE_SCHEMA]
@@ -85,15 +106,66 @@ def get_feature_schema_hash():
     schema_str = json.dumps(FEATURE_SCHEMA, sort_keys=True)
     return hashlib.sha256(schema_str.encode()).hexdigest()[:16]
 
-def safe_ratio(current, prior, default=1.0, cap=10.0):
+def safe_ratio(current, prior, default=RATIO_DEFAULT, cap=RATIO_CAP):
     """Safe division for trend features."""
     if prior == 0:
         return default if current == 0 else cap
     return min(cap, current / prior)
 
+# === SMOOTHING FUNCTIONS ===
+def apply_sma(series, window=SMOOTHING_WINDOW):
+    """Simple Moving Average."""
+    result = []
+    for i in range(len(series)):
+        start = max(0, i - window + 1)
+        result.append(float(np.mean(series[start:i + 1])))
+    return result
+
+def apply_ema(series, alpha=None):
+    """Exponential Moving Average."""
+    if alpha is None:
+        alpha = 2.0 / (SMOOTHING_WINDOW + 1)
+    if not series:
+        return []
+    result = [series[0]]
+    for i in range(1, len(series)):
+        ema_val = alpha * series[i] + (1 - alpha) * result[i - 1]
+        result.append(ema_val)
+    return result
+
+def apply_smoothing(series):
+    """Apply configured smoothing method."""
+    if len(series) <= 1:
+        return series[:]
+    if SMOOTHING_METHOD == "ema":
+        return apply_ema(series, EMA_ALPHA)
+    return apply_sma(series, SMOOTHING_WINDOW)
+
+def compute_trend_slope(smoothed_series):
+    """Linear regression slope on smoothed series."""
+    n = len(smoothed_series)
+    if n < 2:
+        return 0.0
+    t = np.arange(n, dtype=float)
+    y = np.array(smoothed_series, dtype=float)
+    t_mean, y_mean = t.mean(), y.mean()
+    num = np.sum((t - t_mean) * (y - y_mean))
+    denom = np.sum((t - t_mean) ** 2)
+    return float(num / denom) if denom != 0 else 0.0
+
+def compute_cv(values, min_thresh=MIN_ACTIVITY_THRESHOLD, cap=CV_CAP):
+    """Coefficient of Variation with zero-safe handling."""
+    if len(values) < 2:
+        return 0.0
+    mean_val = float(np.mean(values))
+    if mean_val < min_thresh:
+        return 0.0
+    return min(cap, float(np.std(values, ddof=0)) / mean_val)
+
 print(f"📋 Feature Schema Version: {FEATURE_SCHEMA_VERSION}")
 print(f"📊 Expected Features: {EXPECTED_FEATURE_COUNT}")
 print(f"🔐 Schema Hash: {get_feature_schema_hash()}")
+print(f"🔧 Smoothing: {SMOOTHING_METHOD} (window={SMOOTHING_WINDOW})")
 print(f"\n🏷️ Features:")
 for i, name in enumerate(FEATURE_NAMES):
     print(f"  {i+1}. {name}")
@@ -177,6 +249,8 @@ for d in observation_dates:
 # For each (customer, observation_date):
 #   1. Compute features from [obs_date - 90, obs_date]
 #   2. Compute label from [obs_date, obs_date + 90]
+#
+# v3 CHANGE: Also pull per-window data for smoothing
 # ============================================================
 
 training_rows = []
@@ -198,16 +272,22 @@ for obs_date in observation_dates:
             cp.customer_id,
             -- Recency
             EXTRACT(DAY FROM (:obs_date::timestamp - MAX(t.tx_date)))::int as recency_days,
-            -- Frequency & Monetary (current 30d)
-            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.tx_id END) as tx_count_30d,
-            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.tx_id END) as tx_count_90d,
-            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.amount END), 0) as spend_30d,
-            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.amount END), 0) as spend_90d,
-            -- Prior period (30d before that: [obs-60, obs-30])
+            -- Frequency & Monetary (per window for smoothing)
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.tx_id END) as tx_count_w3,
             COUNT(CASE WHEN t.tx_date >= :obs_date::date - 60
-                        AND t.tx_date < :obs_date::date - 30 THEN t.tx_id END) as tx_count_prior_30d,
+                        AND t.tx_date < :obs_date::date - 30 THEN t.tx_id END) as tx_count_w2,
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 90
+                        AND t.tx_date < :obs_date::date - 60 THEN t.tx_id END) as tx_count_w1,
+            -- Total 90d
+            COUNT(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.tx_id END) as tx_count_90d,
+            -- Spend per window
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 30 THEN t.amount END), 0) as spend_w3,
             COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 60
-                              AND t.tx_date < :obs_date::date - 30 THEN t.amount END), 0) as spend_prior_30d,
+                              AND t.tx_date < :obs_date::date - 30 THEN t.amount END), 0) as spend_w2,
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 90
+                              AND t.tx_date < :obs_date::date - 60 THEN t.amount END), 0) as spend_w1,
+            -- Total spend 90d
+            COALESCE(SUM(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.amount END), 0) as spend_90d,
             -- Avg transaction value
             COALESCE(AVG(CASE WHEN t.tx_date >= :obs_date::date - 90 THEN t.amount END), 0) as avg_tx_value
         FROM customer_pool cp
@@ -223,7 +303,6 @@ for obs_date in observation_dates:
         WHERE is_provisional = FALSE
     ),
     -- === LABEL WINDOW: [obs_date, obs_date + 90] ===
-    -- CRITICAL: Label is from FUTURE data, completely independent from features
     label AS (
         SELECT
             cp.customer_id,
@@ -238,14 +317,12 @@ for obs_date in observation_dates:
     SELECT
         tf.customer_id,
         :obs_date::date as observation_date,
-        -- Deviation features
+        -- Raw features
         tf.recency_days,
-        tf.tx_count_30d,
+        tf.tx_count_w1, tf.tx_count_w2, tf.tx_count_w3,
         tf.tx_count_90d,
-        tf.spend_30d,
+        tf.spend_w1, tf.spend_w2, tf.spend_w3,
         tf.spend_90d,
-        tf.tx_count_prior_30d,
-        tf.spend_prior_30d,
         tf.avg_tx_value,
         tn.tenure_days,
         -- Label (from FUTURE window)
@@ -270,12 +347,13 @@ print(f"📊 Disengagement rate: {df_raw['is_disengaged'].mean()*100:.1f}%")
 
 ---
 
-## Cell 7: Compute Derived Features (Trends + Sentiment)
+## Cell 7: Compute Derived Features (v3 — Smoothed + Magnitude + Volatility)
 
 ```python
 # ============================================================
-# COMPUTE DEVIATION FEATURES
-# These capture behavioral CHANGE relative to personal baseline
+# COMPUTE v3 FEATURES
+# 3 Dimensions: Trend (smoothed) + Magnitude + Volatility
+# Plus: Interaction feature and NLP signals
 # ============================================================
 
 # --- Avg Interpurchase Days (per customer, all tx before obs) ---
@@ -298,28 +376,87 @@ df_raw['avg_ipt'] = df_raw.apply(
     lambda r: compute_avg_interpurchase(r['customer_id'], r['observation_date']), axis=1
 )
 
-# --- Deviation/Trend Features ---
+# --- recency_ratio ---
 df_raw['recency_ratio'] = df_raw.apply(
     lambda r: safe_ratio(r['recency_days'], r['avg_ipt']), axis=1)
-df_raw['frequency_trend'] = df_raw.apply(
-    lambda r: safe_ratio(r['tx_count_30d'], r['tx_count_prior_30d']), axis=1)
-df_raw['spend_trend'] = df_raw.apply(
-    lambda r: safe_ratio(r['spend_30d'], r['spend_prior_30d']), axis=1)
 
-# --- Message Features ---
-# Compute msg_count_30d, msg_count_prior_30d per (customer, obs_date)
+# --- Windowed series for smoothing ---
+# tx_count series: [w1 (oldest), w2, w3 (newest)]
+print("⏳ Computing smoothed trends, magnitude, volatility...")
+
+def compute_smoothed_features(row):
+    """Compute all v3 derived features from windowed data."""
+    # Transaction series (oldest → newest)
+    tx_series = [float(row['tx_count_w1']), float(row['tx_count_w2']), float(row['tx_count_w3'])]
+    spend_series = [float(row['spend_w1']), float(row['spend_w2']), float(row['spend_w3'])]
+    
+    # Smoothing
+    tx_smoothed = apply_smoothing(tx_series)
+    spend_smoothed = apply_smoothing(spend_series)
+    
+    # Trend slope (linear regression on smoothed)
+    freq_trend = compute_trend_slope(tx_smoothed)
+    spend_trend = compute_trend_slope(spend_smoothed)
+    
+    # Magnitude
+    activity_mean = float(np.mean(tx_series))
+    recent_activity_avg = float(tx_series[-1])  # Most recent window
+    
+    # Volatility
+    activity_std = float(np.std(tx_series, ddof=0))
+    activity_cv = compute_cv(tx_series)
+    spend_cv = compute_cv(spend_series)
+    
+    # Interaction
+    trend_mag = freq_trend * activity_mean
+    
+    return pd.Series({
+        'frequency_trend_smoothed': freq_trend,
+        'spend_trend_smoothed': spend_trend,
+        'activity_mean': activity_mean,
+        'recent_activity_avg': recent_activity_avg,
+        'activity_std': activity_std,
+        'activity_cv': activity_cv,
+        'spend_volatility_cv': spend_cv,
+        'trend_magnitude_interaction': trend_mag,
+    })
+
+derived = df_raw.apply(compute_smoothed_features, axis=1)
+for col in derived.columns:
+    df_raw[col] = derived[col]
+
+# --- Message Features (with windowed smoothing) ---
 def compute_msg_features(customer_id, obs_date):
-    """Message counts and complaint ratio from verified feedback."""
-    query = text("""
+    """Message counts per window and complaint ratio from verified feedback."""
+    results = {}
+    for window_idx, suffix in enumerate(['w1', 'w2', 'w3']):
+        offset_end = (2 - window_idx) * 30
+        offset_start = offset_end + 30
+        
+        query = text("""
+            SELECT COUNT(*) as cnt
+            FROM feedback_features ff
+            JOIN feedback_linked fl ON ff.link_id = fl.link_id
+            WHERE fl.customer_id = :cid
+              AND fl.link_status = 'verified'
+              AND ff.processed_at >= :obs_date::date - :start
+              AND ff.processed_at < :obs_date::date - :end_off
+        """)
+        try:
+            r = pd.read_sql(query, engine, params={
+                "cid": str(customer_id), "obs_date": str(obs_date),
+                "start": offset_start, "end_off": offset_end
+            })
+            results[f'msg_{suffix}'] = int(r.iloc[0]['cnt']) if len(r) > 0 else 0
+        except:
+            results[f'msg_{suffix}'] = 0
+    
+    # Complaint ratio and other NLP signals (most recent 30d)
+    query2 = text("""
         SELECT
-            COUNT(CASE WHEN ff.processed_at >= :obs_date::date - 30 THEN 1 END) as msg_count_30d,
-            COUNT(CASE WHEN ff.processed_at >= :obs_date::date - 60
-                        AND ff.processed_at < :obs_date::date - 30 THEN 1 END) as msg_count_prior_30d,
-            COALESCE(AVG(CASE WHEN ff.processed_at >= :obs_date::date - 30
-                              THEN CASE WHEN ff.has_complaint THEN 1.0 ELSE 0.0 END END), 0) as complaint_ratio,
+            COALESCE(AVG(CASE WHEN ff.has_complaint THEN 1.0 ELSE 0.0 END), 0) as complaint_ratio,
             COALESCE(STDDEV(daily_count), 0) as msg_volatility,
-            COALESCE(AVG(CASE WHEN ff.processed_at >= :obs_date::date - 30
-                              THEN ff.response_time_secs END), 0) as response_delay_mean
+            COALESCE(AVG(ff.response_time_secs), 0) as response_delay_mean
         FROM feedback_features ff
         JOIN feedback_linked fl ON ff.link_id = fl.link_id
         LEFT JOIN LATERAL (
@@ -334,37 +471,46 @@ def compute_msg_features(customer_id, obs_date):
         ) daily ON true
         WHERE fl.customer_id = :cid
           AND fl.link_status = 'verified'
-          AND ff.processed_at < :obs_date
+          AND ff.processed_at >= :obs_date::date - 30
+          AND ff.processed_at < :obs_date::date
     """)
     try:
-        result = pd.read_sql(query, engine, params={
+        r2 = pd.read_sql(query2, engine, params={
             "cid": str(customer_id), "obs_date": str(obs_date)
         })
-        if len(result) > 0:
-            return result.iloc[0].to_dict()
+        if len(r2) > 0:
+            results['complaint_ratio'] = float(r2.iloc[0].get('complaint_ratio', 0) or 0)
+            results['msg_volatility'] = float(r2.iloc[0].get('msg_volatility', 0) or 0)
+            results['response_delay_mean'] = float(r2.iloc[0].get('response_delay_mean', 0) or 0)
+        else:
+            results['complaint_ratio'] = 0.0
+            results['msg_volatility'] = 0.0
+            results['response_delay_mean'] = 0.0
     except:
-        pass
-    return {
-        "msg_count_30d": 0, "msg_count_prior_30d": 0,
-        "complaint_ratio": 0.0, "msg_volatility": 0.0, "response_delay_mean": 0.0
-    }
+        results['complaint_ratio'] = 0.0
+        results['msg_volatility'] = 0.0
+        results['response_delay_mean'] = 0.0
+    
+    return results
 
 print("⏳ Computing message features...")
 msg_features = df_raw.apply(
     lambda r: compute_msg_features(r['customer_id'], r['observation_date']), axis=1
 )
 msg_df = pd.DataFrame(msg_features.tolist())
-df_raw['msg_count_30d_val'] = msg_df['msg_count_30d']
-df_raw['msg_count_prior_30d'] = msg_df['msg_count_prior_30d']
+
+# Compute msg_trend_smoothed from windowed message series
+def compute_msg_trend_from_row(row):
+    msg_series = [float(row.get('msg_w1', 0)), float(row.get('msg_w2', 0)), float(row.get('msg_w3', 0))]
+    smoothed = apply_smoothing(msg_series)
+    return compute_trend_slope(smoothed)
+
+df_raw['msg_trend_smoothed'] = msg_df.apply(compute_msg_trend_from_row, axis=1)
 df_raw['complaint_ratio'] = msg_df['complaint_ratio']
 df_raw['msg_volatility'] = msg_df['msg_volatility']
 df_raw['response_delay_mean'] = msg_df['response_delay_mean']
 
-df_raw['msg_trend'] = df_raw.apply(
-    lambda r: safe_ratio(r['msg_count_30d_val'], r['msg_count_prior_30d']), axis=1)
-
 # --- Sentiment Features ---
-# Try from customer_text_semantics first, else default to 0
 def compute_sentiment(customer_id, obs_date):
     """Get sentiment from pre-computed semantics table."""
     query = text("""
@@ -401,7 +547,7 @@ sentiment_results = df_raw.apply(
 df_raw['avg_sentiment_score'] = sentiment_results.apply(lambda x: x[0])
 df_raw['sentiment_trend'] = sentiment_results.apply(lambda x: x[1])
 
-print(f"\n✅ All features computed!")
+print(f"\n✅ All v3 features computed!")
 print(f"📊 Feature columns available: {len(df_raw.columns)}")
 ```
 
@@ -414,24 +560,7 @@ print(f"📊 Feature columns available: {len(df_raw.columns)}")
 # ASSEMBLE X AND y IN SCHEMA ORDER
 # ============================================================
 
-# Build X in exact FEATURE_SCHEMA order
-X = pd.DataFrame({
-    "recency_ratio": df_raw["recency_ratio"],
-    "frequency_trend": df_raw["frequency_trend"],
-    "spend_trend": df_raw["spend_trend"],
-    "msg_trend": df_raw["msg_trend"],
-    "sentiment_trend": df_raw["sentiment_trend"],
-    "recency_days": df_raw["recency_days"].astype(float),
-    "tx_count_90d": df_raw["tx_count_90d"].astype(float),
-    "spend_90d": df_raw["spend_90d"].astype(float),
-    "avg_tx_value": df_raw["avg_tx_value"].astype(float),
-    "tenure_days": df_raw["tenure_days"].astype(float),
-    "avg_sentiment_score": df_raw["avg_sentiment_score"],
-    "complaint_ratio": df_raw["complaint_ratio"],
-    "msg_volatility": df_raw["msg_volatility"],
-    "response_delay_mean": df_raw["response_delay_mean"],
-})
-
+X = pd.DataFrame({name: df_raw[name] for name in FEATURE_NAMES})
 y = df_raw['is_disengaged'].copy()
 obs_dates = df_raw['observation_date'].copy()
 
@@ -447,25 +576,85 @@ print(f"\n❓ Missing values:\n{X.isnull().sum()}")
 
 ---
 
+## Cell 8.5: 📊 Feature Validation (Pre-Modeling EDA)
+
+```python
+# ============================================================
+# FEATURE VALIDATION — Distribution & Discriminative Power
+# ============================================================
+
+print("=" * 60)
+print("📊 FEATURE VALIDATION (Pre-Modeling)")
+print("=" * 60)
+
+# 1. Distribution plots
+fig, axes = plt.subplots(5, 4, figsize=(20, 20))
+axes = axes.ravel()
+for i, name in enumerate(FEATURE_NAMES):
+    ax = axes[i]
+    X[name].hist(bins=30, ax=ax, alpha=0.7, color='steelblue')
+    ax.set_title(name, fontsize=10)
+    ax.set_xlabel('')
+plt.suptitle('Feature Distributions (v3)', fontsize=14, y=1.02)
+plt.tight_layout()
+plt.show()
+
+# 2. Compare high-risk vs low-risk
+print("\n📊 Feature comparison: Disengaged vs Active")
+comparison = pd.DataFrame({
+    'Active_mean': X[y == 0].mean(),
+    'Disengaged_mean': X[y == 1].mean(),
+    'Active_std': X[y == 0].std(),
+    'Disengaged_std': X[y == 1].std(),
+})
+comparison['diff_pct'] = ((comparison['Disengaged_mean'] - comparison['Active_mean'])
+                          / comparison['Active_mean'].replace(0, np.nan) * 100)
+print(comparison.round(3).to_string())
+
+# 3. Correlation matrix
+print("\n📊 Feature Correlation Matrix")
+corr = X.corr()
+plt.figure(figsize=(14, 12))
+mask = np.triu(np.ones_like(corr, dtype=bool))
+sns.heatmap(corr, mask=mask, annot=True, fmt='.2f', cmap='RdBu_r',
+            center=0, vmin=-1, vmax=1, square=True, linewidths=0.5)
+plt.title('Feature Correlation Matrix (v3)')
+plt.tight_layout()
+plt.show()
+
+# 4. Redundancy detection
+print("\n⚠️ Highly Correlated Pairs (|corr| > 0.90):")
+high_corr = []
+for i in range(len(corr.columns)):
+    for j in range(i+1, len(corr.columns)):
+        if abs(corr.iloc[i, j]) > 0.90:
+            high_corr.append((corr.columns[i], corr.columns[j], corr.iloc[i, j]))
+            print(f"  {corr.columns[i]} ↔ {corr.columns[j]}: {corr.iloc[i, j]:.3f}")
+if not high_corr:
+    print("  ✅ No highly correlated pairs found")
+
+# 5. Edge case report
+print(f"\n📊 Edge Case Report:")
+print(f"  Zero activity_mean: {(X['activity_mean'] == 0).sum()} samples")
+print(f"  Zero recent_activity: {(X['recent_activity_avg'] == 0).sum()} samples")
+print(f"  Zero activity_cv: {(X['activity_cv'] == 0).sum()} samples")
+print(f"  Capped activity_cv (={CV_CAP}): {(X['activity_cv'] >= CV_CAP).sum()} samples")
+```
+
+---
+
 ## Cell 9: TIME-BASED Train-Test Split (CRITICAL!)
 
 ```python
 # ============================================================
 # TIME-BASED SPLIT (NOT random!)
-#
-# Training: earlier observation dates
-# Test: later observation dates
-#
-# This simulates real-world usage: train on past, predict future
 # ============================================================
 
-# Sort by observation_date
 sort_idx = obs_dates.argsort()
 X = X.iloc[sort_idx].reset_index(drop=True)
 y = y.iloc[sort_idx].reset_index(drop=True)
 obs_dates_sorted = obs_dates.iloc[sort_idx].reset_index(drop=True)
 
-# Split at 80th percentile of time
 cutoff_idx = int(len(X) * 0.8)
 cutoff_date = obs_dates_sorted.iloc[cutoff_idx]
 
@@ -593,9 +782,9 @@ importance_df = pd.DataFrame({
     'importance': xgb_model.feature_importances_
 }).sort_values('importance', ascending=False)
 
-plt.figure(figsize=(10, 8))
+plt.figure(figsize=(10, 10))
 sns.barplot(data=importance_df, x='importance', y='feature', palette='viridis')
-plt.title('Feature Importance (XGBoost v2)')
+plt.title('Feature Importance (XGBoost v3)')
 plt.xlabel('Importance Score')
 plt.tight_layout()
 plt.show()
@@ -668,6 +857,20 @@ if nlp_pct < 5:
 else:
     print(f"   ✅ NLP features contribute {nlp_pct:.1f}%")
 
+# --- Test 4: NEW v3 feature contribution ---
+print("\n📊 Test 4: v3 New Feature Contribution")
+v3_features = ['activity_mean', 'recent_activity_avg', 'activity_std', 
+                'activity_cv', 'spend_volatility_cv', 'trend_magnitude_interaction',
+                'frequency_trend_smoothed', 'spend_trend_smoothed', 'msg_trend_smoothed']
+v3_importance = sum(importance_df[importance_df['feature'].isin(v3_features)]['importance'])
+v3_pct = v3_importance / total_importance * 100 if total_importance > 0 else 0
+print(f"   v3 new features: {len(v3_features)}")
+print(f"   v3 contribution: {v3_pct:.1f}%")
+if v3_pct < 10:
+    print(f"   ⚠️ New v3 features contribute <10% — verify they add value")
+else:
+    print(f"   ✅ New v3 features contribute {v3_pct:.1f}%")
+
 print("\n" + "=" * 60)
 ```
 
@@ -687,9 +890,9 @@ else:
 
 assert shap_values.shape[1] == EXPECTED_FEATURE_COUNT, "SHAP feature count mismatch!"
 
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(12, 10))
 shap.summary_plot(shap_values, X_test, feature_names=FEATURE_NAMES, show=False)
-plt.title('SHAP Feature Impact (v2 Risk Scoring)')
+plt.title('SHAP Feature Impact (v3 Risk Scoring)')
 plt.tight_layout()
 plt.show()
 ```
@@ -701,7 +904,7 @@ plt.show()
 ```python
 import os, pickle
 
-MODEL_VERSION = "v2.0.0"
+MODEL_VERSION = "v3.0.0"
 SAVE_DIR = "../backend/ml_models"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -715,17 +918,33 @@ feature_metadata = {
     "expected_shape": EXPECTED_FEATURE_COUNT,
     "feature_schema": FEATURE_SCHEMA,
     "feature_schema_hash": get_feature_schema_hash(),
+    "schema_version": FEATURE_SCHEMA_VERSION,
+    "feature_config": {
+        "smoothing_method": SMOOTHING_METHOD,
+        "smoothing_window": SMOOTHING_WINDOW,
+        "ema_alpha": EMA_ALPHA,
+        "activity_windows": ACTIVITY_WINDOWS,
+        "window_size_days": WINDOW_SIZE_DAYS,
+        "min_activity_threshold": MIN_ACTIVITY_THRESHOLD,
+        "cv_cap": CV_CAP,
+    },
     "feature_descriptions": {
         "recency_ratio": "Rasio recency terhadap baseline personal",
-        "frequency_trend": "Tren frekuensi transaksi (30d vs prior 30d)",
-        "spend_trend": "Tren belanja (30d vs prior 30d)",
-        "msg_trend": "Tren komunikasi (30d vs prior 30d)",
+        "frequency_trend_smoothed": "Slope tren frekuensi (smoothed, de-noised)",
+        "spend_trend_smoothed": "Slope tren belanja (smoothed, de-noised)",
+        "msg_trend_smoothed": "Slope tren komunikasi (smoothed, de-noised)",
         "sentiment_trend": "Perubahan sentimen (30d vs prior 30d)",
         "recency_days": "Hari sejak transaksi terakhir",
         "tx_count_90d": "Jumlah transaksi 90 hari",
         "spend_90d": "Total belanja 90 hari",
         "avg_tx_value": "Rata-rata nilai transaksi",
         "tenure_days": "Lama menjadi customer (hari)",
+        "activity_mean": "Rata-rata tx per window (3 × 30d)",
+        "recent_activity_avg": "Tx count di window terkini",
+        "activity_std": "Std deviasi aktivitas antar window",
+        "activity_cv": "Koefisien variasi aktivitas (std/mean)",
+        "spend_volatility_cv": "Koefisien variasi belanja antar window",
+        "trend_magnitude_interaction": "Interaksi tren × tingkat aktivitas",
         "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
         "complaint_ratio": "Rasio pesan komplain 30 hari",
         "msg_volatility": "Volatilitas pola pesan",
@@ -736,11 +955,8 @@ feature_metadata = {
 # Save artifacts
 joblib.dump(xgb_model, f"{SAVE_DIR}/churn_model.joblib")
 joblib.dump(explainer, f"{SAVE_DIR}/shap_explainer.joblib")
-
-# Save imputer for inference
 joblib.dump(imputer, f"{SAVE_DIR}/imputer.joblib")
 
-# Save feature metadata as JSON
 with open(f"{SAVE_DIR}/feature_metadata.json", 'w') as f:
     json.dump(feature_metadata, f, indent=2)
 
@@ -757,11 +973,15 @@ print(f"🔐 Schema hash: {get_feature_schema_hash()}")
 
 ## Summary
 
-Dengan training guide v2 ini:
+Dengan training guide v3 ini:
 1. ✅ **Label temporal** — fitur dari masa lalu, label dari masa depan
-2. ✅ **Fitur deviasi** — recency_ratio, frequency_trend, spend_trend, msg_trend
-3. ✅ **Sentiment features** — avg_sentiment_score, sentiment_trend
-4. ✅ **Time-based split** — train pada data awal, test pada data akhir
-5. ✅ **Imputation setelah split** — fit pada training saja
-6. ✅ **Ablation tests** — validasi model bukan rule approximator
-7. ✅ **14 features** sesuai FEATURE_SCHEMA v2.0.0
+2. ✅ **Smoothed trends** — frequency_trend_smoothed, spend_trend_smoothed, msg_trend_smoothed
+3. ✅ **Magnitude features** — activity_mean, recent_activity_avg
+4. ✅ **Volatility features** — activity_std, activity_cv, spend_volatility_cv
+5. ✅ **Interaction feature** — trend_magnitude_interaction
+6. ✅ **Sentiment features** — avg_sentiment_score, sentiment_trend
+7. ✅ **Time-based split** — train pada data awal, test pada data akhir
+8. ✅ **Imputation setelah split** — fit pada training saja
+9. ✅ **Pre-modeling EDA** — distribusi, korelasi, redundancy check
+10. ✅ **Ablation tests** — validasi model bukan rule approximator
+11. ✅ **20 features** sesuai FEATURE_SCHEMA v3.0.0
