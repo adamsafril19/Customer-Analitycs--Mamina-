@@ -45,6 +45,16 @@ export function useCustomerTimeline(
   });
 }
 
+export function useCustomerRiskHistory(customerId, limit = 20) {
+  return useQuery({
+    queryKey: ["customerRiskHistory", customerId, limit],
+    queryFn: () =>
+      customersAPI.getRiskHistory(customerId, limit).then((res) => res.data),
+    enabled: !!customerId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCreateCustomer() {
   const queryClient = useQueryClient();
 

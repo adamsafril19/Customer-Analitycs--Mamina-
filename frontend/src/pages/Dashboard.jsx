@@ -12,7 +12,7 @@ import {
 } from "../hooks/useDashboard";
 import { useCustomers } from "../hooks/useCustomers";
 import KPICard from "../components/dashboard/KPICard";
-import ChurnTrendChart from "../components/dashboard/ChurnTrendChart";
+import RiskTrendChart from "../components/dashboard/RiskTrendChart";
 import TopDriversChart from "../components/dashboard/TopDriversChart";
 import RecentHighRiskTable from "../components/dashboard/RecentHighRiskTable";
 import { CardSkeleton, ChartSkeleton } from "../components/common/Skeleton";
@@ -43,7 +43,7 @@ function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 mt-1">Overview risiko churn customer</p>
+          <p className="text-gray-500 mt-1">Prioritas risiko customer</p>
         </div>
         <Button
           variant="outline"
@@ -79,8 +79,8 @@ function Dashboard() {
               className="border-l-4 border-red-500"
             />
             <KPICard
-              title="Rata-rata Churn Score"
-              value={`${((stats?.avg_churn_score || 0) * 100).toFixed(1)}%`}
+              title="Rata-rata Risk Score"
+              value={`${((stats?.avg_risk_score || 0) * 100).toFixed(1)}%`}
               icon={<TrendingUp className="h-6 w-6 text-yellow-600" />}
               subtext="Level risiko keseluruhan"
             />
@@ -99,7 +99,7 @@ function Dashboard() {
         {trendLoading ? (
           <ChartSkeleton />
         ) : (
-          <ChurnTrendChart data={trend?.data} />
+          <RiskTrendChart data={trend?.data} />
         )}
 
         {driversLoading ? (

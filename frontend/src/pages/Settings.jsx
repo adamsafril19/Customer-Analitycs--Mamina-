@@ -69,7 +69,7 @@ function Settings() {
   };
 
   const tabs = [
-    { id: "threshold", label: "Churn Threshold", icon: Sliders },
+    { id: "threshold", label: "Risk Threshold", icon: Sliders },
     { id: "profile", label: "Profil", icon: User },
   ];
 
@@ -110,9 +110,9 @@ function Settings() {
           {activeTab === "threshold" && (
             <Card>
               <Card.Header>
-                <Card.Title>Churn Risk Threshold</Card.Title>
+                <Card.Title>Risk Score Threshold</Card.Title>
                 <Card.Description>
-                  Atur batas skor untuk kategori risiko churn
+                  Atur batas skor untuk kategori risiko
                 </Card.Description>
               </Card.Header>
               <Card.Content>

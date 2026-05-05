@@ -46,7 +46,7 @@ function TopDriversChart({ data }) {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">
-        Faktor Utama Penyebab Churn
+        Faktor Utama Risiko
       </h3>
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">

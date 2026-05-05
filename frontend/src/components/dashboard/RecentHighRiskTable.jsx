@@ -50,12 +50,12 @@ function RecentHighRiskTable({ customers }) {
                 )}
               </Table.Cell>
               <Table.Cell className="font-semibold text-red-600">
-                {customer.churn_score != null
-                  ? `${(customer.churn_score * 100).toFixed(0)}%`
+                {customer.risk_score != null
+                  ? `${(customer.risk_score * 100).toFixed(0)}%`
                   : "-"}
               </Table.Cell>
               <Table.Cell>
-                <RiskLevelBadge score={customer.churn_score} />
+                <RiskLevelBadge score={customer.risk_score} />
               </Table.Cell>
               <Table.Cell className="text-right">
                 <button

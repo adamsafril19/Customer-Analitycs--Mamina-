@@ -1,7 +1,8 @@
-"""
-Churn Prediction Model
+"""Risk Prediction Model
 
 REVISED: Semantically dumb - only numerical output, no storytelling
+DB columns retain 'churn_score'/'churn_label' names (no migration needed).
+API responses use 'risk_score'/'risk_label' aliases.
 """
 import uuid
 from datetime import datetime, date
@@ -99,12 +100,16 @@ class ChurnPrediction(db.Model):
             return "high"
     
     def to_dict(self) -> dict:
-        """Convert to dictionary with full epistemological provenance"""
+        """Convert to dictionary with risk_score/risk_label aliases.
+        
+        DB columns are churn_score/churn_label (no migration).
+        API output uses risk_score/risk_label for behavioral risk scoring alignment.
+        """
         return {
             "pred_id": str(self.pred_id),
             "customer_id": str(self.customer_id),
-            "churn_score": self.churn_score,
-            "churn_label": self.churn_label,
+            "risk_score": self.churn_score,
+            "risk_label": self.churn_label,
             "model_version": self.model_version,
             "as_of_date": self.as_of_date.isoformat() if self.as_of_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

@@ -15,7 +15,7 @@ function CustomerTable({ customers }) {
           <Table.Head>Customer</Table.Head>
           <Table.Head>Kota</Table.Head>
           <Table.Head>Kunjungan Terakhir</Table.Head>
-          <Table.Head>Churn Score</Table.Head>
+          <Table.Head>Risk Score</Table.Head>
           <Table.Head>Status</Table.Head>
           <Table.Head className="text-right">Aksi</Table.Head>
         </Table.Row>
@@ -52,11 +52,11 @@ function CustomerTable({ customers }) {
             </Table.Cell>
             <Table.Cell>
               <div className="w-32">
-                <ChurnScoreBadge score={customer.churn_score} size="sm" />
+                <ChurnScoreBadge score={customer.risk_score} size="sm" />
               </div>
             </Table.Cell>
             <Table.Cell>
-              <RiskLevelBadge score={customer.churn_score} />
+              <RiskLevelBadge score={customer.risk_score} />
             </Table.Cell>
             <Table.Cell className="text-right">
               <button

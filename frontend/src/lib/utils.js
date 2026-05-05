@@ -40,7 +40,7 @@ export function formatRelativeTime(date) {
 }
 
 /**
- * Get risk level from churn score
+ * Get risk level from behavioral risk score (0-1)
  */
 export function getRiskLevel(score) {
   if (score >= 0.7) return "high";
@@ -122,111 +122,164 @@ export function getInitials(name) {
 }
 
 /**
- * Feature labels mapping (SHAP features to Indonesian)
+ * Feature labels mapping v3.0.0 — 20 behavioral risk features to Indonesian
  */
 export const FEATURE_LABELS = {
-  avg_sentiment_30: "Sentimen Negatif",
-  f_score: "Frekuensi Kunjungan",
-  response_time_secs: "Waktu Respon Admin",
-  m_score: "Nilai Transaksi",
+  // Trend (5)
+  recency_ratio: "Rasio Keterlambatan Kunjungan",
+  frequency_trend_smoothed: "Tren Frekuensi Kunjungan",
+  spend_trend_smoothed: "Tren Pengeluaran",
+  msg_trend_smoothed: "Tren Komunikasi",
+  sentiment_trend: "Tren Sentimen",
+  // Context (5)
+  recency_days: "Hari Sejak Kunjungan Terakhir",
+  tx_count_90d: "Jumlah Transaksi (90 Hari)",
+  spend_90d: "Total Pengeluaran (90 Hari)",
+  avg_tx_value: "Rata-rata Nilai Transaksi",
   tenure_days: "Lama Berlangganan",
-  r_score: "Recency Kunjungan",
-  total_transactions: "Total Transaksi",
-  avg_transaction_value: "Nilai Rata-rata Transaksi",
-  message_count_30: "Jumlah Pesan",
-  negative_message_ratio: "Rasio Pesan Negatif",
+  // Magnitude (2)
+  activity_mean: "Rata-rata Aktivitas",
+  recent_activity_avg: "Aktivitas Terkini",
+  // Volatility (3)
+  activity_std: "Stabilitas Frekuensi",
+  activity_cv: "Volatilitas Aktivitas",
+  spend_volatility_cv: "Volatilitas Pengeluaran",
+  // Interaction (1)
+  trend_magnitude_interaction: "Interaksi Tren × Aktivitas",
+  // NLP (4)
+  avg_sentiment_score: "Sentimen Rata-rata",
+  complaint_ratio: "Rasio Komplain",
+  msg_volatility: "Volatilitas Pesan",
+  response_delay_mean: "Waktu Respon Admin",
 };
 
 /**
- * Explainability mapping for SHAP features
+ * Explainability mapping v3.0.0 — Behavioral risk factor descriptions
  */
+const impactLabel = (impact) =>
+  Math.abs(impact) > 0.2 ? "Tinggi" : Math.abs(impact) > 0.1 ? "Sedang" : "Rendah";
+
 export const EXPLAINABILITY_MAP = {
-  avg_sentiment_30: {
-    icon: "⬇️",
-    title: "Sentimen negatif berulang",
-    getDetail: (value, impact) => {
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Sentimen rata-rata: ${(
-        value * 100
-      ).toFixed(0)}%`;
-    },
+  recency_ratio: {
+    icon: "⏰",
+    title: "Kunjungan terlambat dari pola biasa",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Rasio keterlambatan: ${value?.toFixed(1)}x`,
   },
-  f_score: {
-    icon: "⬇️",
-    title: "Frekuensi kunjungan menurun",
-    getDetail: (value, impact) => {
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Skor frekuensi: ${(value * 100).toFixed(
-        0
-      )}%`;
-    },
+  frequency_trend_smoothed: {
+    icon: "📉",
+    title: "Tren frekuensi kunjungan menurun",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Slope tren: ${value?.toFixed(3)}`,
   },
-  response_time_secs: {
-    icon: "⬆️",
-    title: "Waktu respon admin meningkat",
-    getDetail: (value, impact) => {
-      const hours = (value / 3600).toFixed(1);
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Rata-rata ${hours} jam`;
-    },
+  spend_trend_smoothed: {
+    icon: "💸",
+    title: "Tren pengeluaran menurun",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Slope tren: ${value?.toFixed(3)}`,
   },
-  m_score: {
-    icon: "⬇️",
-    title: "Nilai transaksi menurun",
-    getDetail: (value, impact) => {
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Skor nilai: ${(value * 100).toFixed(
-        0
-      )}%`;
-    },
+  msg_trend_smoothed: {
+    icon: "💬",
+    title: "Tren komunikasi menurun",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Slope tren: ${value?.toFixed(3)}`,
+  },
+  sentiment_trend: {
+    icon: "😔",
+    title: "Sentimen memburuk",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Perubahan sentimen: ${value?.toFixed(2)}`,
+  },
+  recency_days: {
+    icon: "📅",
+    title: "Sudah lama tidak berkunjung",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | ${Math.round(value || 0)} hari sejak kunjungan terakhir`,
+  },
+  tx_count_90d: {
+    icon: "🔢",
+    title: "Frekuensi transaksi rendah",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | ${Math.round(value || 0)} transaksi dalam 90 hari`,
+  },
+  spend_90d: {
+    icon: "💰",
+    title: "Pengeluaran dalam 90 hari",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Rp ${(value || 0).toLocaleString("id-ID")}`,
+  },
+  avg_tx_value: {
+    icon: "🧾",
+    title: "Rata-rata nilai transaksi",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Rp ${(value || 0).toLocaleString("id-ID")}`,
   },
   tenure_days: {
     icon: "⚠️",
-    title: "Customer masih baru",
-    getDetail: (value, impact) => {
-      const months = Math.floor(value / 30);
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Bergabung ${months} bulan lalu`;
-    },
+    title: "Durasi berlangganan",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Bergabung ${Math.floor((value || 0) / 30)} bulan lalu`,
   },
-  r_score: {
-    icon: "⬇️",
-    title: "Sudah lama tidak berkunjung",
+  activity_mean: {
+    icon: "📊",
+    title: "Tingkat aktivitas rata-rata",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Rata-rata: ${value?.toFixed(1)} per window`,
+  },
+  recent_activity_avg: {
+    icon: "📈",
+    title: "Aktivitas terkini",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Aktivitas terkini: ${value?.toFixed(1)}`,
+  },
+  activity_std: {
+    icon: "📉",
+    title: "Ketidakstabilan frekuensi",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Std deviasi: ${value?.toFixed(2)}`,
+  },
+  activity_cv: {
+    icon: "🔀",
+    title: "Volatilitas aktivitas tinggi",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | CV: ${value?.toFixed(2)}`,
+  },
+  spend_volatility_cv: {
+    icon: "💱",
+    title: "Pengeluaran tidak stabil",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | CV pengeluaran: ${value?.toFixed(2)}`,
+  },
+  trend_magnitude_interaction: {
+    icon: "🔗",
+    title: "Penurunan pada customer aktif",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Interaksi tren×aktivitas: ${value?.toFixed(3)}`,
+  },
+  avg_sentiment_score: {
+    icon: "😐",
+    title: "Sentimen rata-rata rendah",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Sentimen: ${((value || 0) * 100).toFixed(0)}%`,
+  },
+  complaint_ratio: {
+    icon: "🚨",
+    title: "Rasio komplain tinggi",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Komplain: ${((value || 0) * 100).toFixed(0)}%`,
+  },
+  msg_volatility: {
+    icon: "📱",
+    title: "Pola komunikasi tidak stabil",
+    getDetail: (value, impact) =>
+      `Impact: ${impactLabel(impact)} | Volatilitas: ${value?.toFixed(2)}`,
+  },
+  response_delay_mean: {
+    icon: "⏱️",
+    title: "Waktu respon admin lambat",
     getDetail: (value, impact) => {
-      const impactLabel =
-        Math.abs(impact) > 0.2
-          ? "Tinggi"
-          : Math.abs(impact) > 0.1
-          ? "Sedang"
-          : "Rendah";
-      return `Impact: ${impactLabel} | Skor recency: ${(value * 100).toFixed(
-        0
-      )}%`;
+      const hours = ((value || 0) / 3600).toFixed(1);
+      return `Impact: ${impactLabel(impact)} | Rata-rata ${hours} jam`;
     },
   },
 };

@@ -33,7 +33,7 @@ function App() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="customers" element={<CustomerList />} />
           <Route path="customers/:id" element={<CustomerDetail />} />
-          <Route path="churn" element={<ChurnRisk />} />
+          <Route path="risk" element={<ChurnRisk />} />
           <Route path="actions" element={<Actions />} />
           <Route path="settings" element={<Settings />} />
         </Route>

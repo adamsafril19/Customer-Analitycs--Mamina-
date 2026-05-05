@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Search, Filter, Plus, Grid, List } from "lucide-react";
+import { Search, Filter, Plus, Grid, List, ArrowUpDown, AlertTriangle } from "lucide-react";
 import { useCustomers } from "../hooks/useCustomers";
 import CustomerTable from "../components/customer/CustomerTable";
 import CustomerCard from "../components/customer/CustomerCard";
@@ -18,10 +18,12 @@ function CustomerList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState("table"); // 'table' | 'grid'
 
-  // Get params from URL
+  // Get params from URL — default sort = risk_score DESC (prioritization)
   const search = searchParams.get("search") || "";
   const risk = searchParams.get("risk") || "";
   const city = searchParams.get("city") || "";
+  const sort = searchParams.get("sort") || "risk_score";
+  const order = searchParams.get("order") || "desc";
   const page = parseInt(searchParams.get("page") || "1", 10);
   const limit = 20;
 
@@ -43,11 +45,13 @@ function CustomerList() {
     }
   }, [debouncedSearch]);
 
-  // Fetch customers
+  // Fetch customers with sort params
   const { data, isLoading, error } = useCustomers({
     search: debouncedSearch,
-    risk: risk || undefined,
+    risk_level: risk || undefined,
     city: city || undefined,
+    sort,
+    order,
     page,
     limit,
   });
@@ -71,6 +75,20 @@ function CustomerList() {
     [searchParams, setSearchParams]
   );
 
+  // Handle sort toggle
+  const handleSortToggle = useCallback(() => {
+    const newParams = new URLSearchParams(searchParams);
+    if (sort === "risk_score") {
+      newParams.set("sort", "name");
+      newParams.set("order", "asc");
+    } else {
+      newParams.set("sort", "risk_score");
+      newParams.set("order", "desc");
+    }
+    newParams.set("page", "1");
+    setSearchParams(newParams);
+  }, [searchParams, setSearchParams, sort]);
+
   // Handle page change
   const handlePageChange = useCallback(
     (newPage) => {
@@ -81,6 +99,20 @@ function CustomerList() {
     [searchParams, setSearchParams]
   );
 
+  // Quick filter: Top High-Risk
+  const handleHighRiskFilter = useCallback(() => {
+    const newParams = new URLSearchParams(searchParams);
+    if (risk === "high") {
+      newParams.delete("risk");
+    } else {
+      newParams.set("risk", "high");
+      newParams.set("sort", "risk_score");
+      newParams.set("order", "desc");
+    }
+    newParams.set("page", "1");
+    setSearchParams(newParams);
+  }, [searchParams, setSearchParams, risk]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -88,15 +120,21 @@ function CustomerList() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-500 mt-1">
-            {total > 0 ? `${total} customer ditemukan` : "Kelola data customer"}
+            {sort === "risk_score"
+              ? "Diurutkan berdasarkan tingkat risiko tertinggi"
+              : `${total > 0 ? `${total} customer ditemukan` : "Kelola data customer"}`}
           </p>
         </div>
-        <Button
-          icon={<Plus className="h-4 w-4" />}
-          onClick={() => navigate("/customers/new")}
-        >
-          Tambah Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={risk === "high" ? "primary" : "outline"}
+            icon={<AlertTriangle className="h-4 w-4" />}
+            onClick={handleHighRiskFilter}
+            className={risk === "high" ? "bg-red-600 hover:bg-red-700" : ""}
+          >
+            {risk === "high" ? "High Risk ✓" : "Top High-Risk"}
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -128,6 +166,19 @@ function CustomerList() {
               <option value="high">Risiko Tinggi</option>
             </select>
           </div>
+
+          {/* Sort Toggle */}
+          <button
+            onClick={handleSortToggle}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${
+              sort === "risk_score"
+                ? "bg-red-50 text-red-700 border border-red-200"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            {sort === "risk_score" ? "Sort: Risk ↓" : "Sort: Nama A-Z"}
+          </button>
 
           {/* View Mode Toggle */}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">

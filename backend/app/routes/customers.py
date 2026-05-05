@@ -131,8 +131,8 @@ def get_customer_360(customer_id: str):
     if latest_prediction:
         prediction_data = {
             "pred_id": str(latest_prediction.pred_id),
-            "churn_score": latest_prediction.churn_score,
-            "churn_label": latest_prediction.churn_label,
+            "risk_score": latest_prediction.churn_score,
+            "risk_label": latest_prediction.churn_label,
             "top_reasons": latest_prediction.top_reasons,
             "model_version": latest_prediction.model_version,
             "as_of_date": latest_prediction.as_of_date.isoformat() if latest_prediction.as_of_date else None
@@ -245,10 +245,12 @@ def get_customer_timeline(customer_id: str):
 @customers_bp.route("/customers", methods=["GET"])
 @jwt_required()
 def list_customers():
-    """List customers with pagination"""
+    """List customers with pagination. Supports sort=risk_score for prioritization."""
     search = request.args.get("search")
     is_active = request.args.get("is_active")
     risk_level = request.args.get("risk_level")
+    sort_by = request.args.get("sort", "name")  # 'name' or 'risk_score'
+    sort_order = request.args.get("order", "asc")  # 'asc' or 'desc'
     limit = min(100, max(1, request.args.get("limit", 20, type=int)))
     page = max(1, request.args.get("page", 1, type=int))
     offset = (page - 1) * limit
@@ -267,10 +269,57 @@ def list_customers():
         is_active_bool = str(is_active).lower() in ["true", "1"]
         query = query.filter_by(is_active=is_active_bool)
     
-    total = query.count()
-    customers = query.order_by(Customer.name).offset(offset).limit(limit).all()
+    # For risk_score sorting, join with latest predictions
+    if sort_by == "risk_score":
+        # Subquery: latest prediction per customer
+        latest_pred = db.session.query(
+            ChurnPrediction.customer_id,
+            func.max(ChurnPrediction.created_at).label("max_created")
+        ).group_by(ChurnPrediction.customer_id).subquery()
+        
+        query = query.outerjoin(
+            latest_pred, Customer.customer_id == latest_pred.c.customer_id
+        ).outerjoin(
+            ChurnPrediction,
+            db.and_(
+                ChurnPrediction.customer_id == latest_pred.c.customer_id,
+                ChurnPrediction.created_at == latest_pred.c.max_created
+            )
+        )
+        
+        # Filter by risk level if specified
+        if risk_level:
+            query = query.filter(ChurnPrediction.churn_label == risk_level)
+        
+        total = query.count()
+        
+        if sort_order == "desc":
+            query = query.order_by(
+                ChurnPrediction.churn_score.desc().nullslast()
+            )
+        else:
+            query = query.order_by(
+                ChurnPrediction.churn_score.asc().nullslast()
+            )
+        
+        customers = query.offset(offset).limit(limit).all()
+    else:
+        if risk_level:
+            # Filter by risk level requires joining predictions
+            customer_ids_with_risk = db.session.query(
+                ChurnPrediction.customer_id
+            ).filter(
+                ChurnPrediction.churn_label == risk_level
+            ).distinct().subquery()
+            
+            query = query.filter(
+                Customer.customer_id.in_(db.session.query(customer_ids_with_risk))
+            )
+        
+        total = query.count()
+        customers = query.order_by(Customer.name).offset(offset).limit(limit).all()
     
-    # Get predictions
+    # Get predictions for display
     customer_ids = [c.customer_id for c in customers]
     predictions = {}
     if customer_ids:
@@ -286,8 +335,8 @@ def list_customers():
         data = c.to_dict()
         pred = predictions.get(c.customer_id)
         if pred:
-            data["churn_score"] = round(pred.churn_score, 3)
-            data["churn_label"] = pred.churn_label
+            data["risk_score"] = round(pred.churn_score, 3)
+            data["risk_label"] = pred.churn_label
         result.append(data)
     
     return jsonify({"total": total, "customers": result})
@@ -366,3 +415,43 @@ def delete_customer(customer_id: str):
     db.session.commit()
     
     return jsonify({"message": "Customer deleted", "customer_id": customer_id})
+
+
+@customers_bp.route("/customers/<customer_id>/risk-history", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_customer_risk_history(customer_id: str):
+    """Get historical risk score predictions for a customer.
+    
+    Returns all predictions ordered by date, enabling trend visualization
+    of how the customer's risk score has evolved over time.
+    """
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    
+    customer_uuid = validate_uuid(customer_id, "customer_id")
+    
+    customer = Customer.query.get(customer_uuid)
+    if not customer:
+        raise NotFoundError(f"Customer {customer_id} not found")
+    
+    limit = request.args.get("limit", 20, type=int)
+    
+    predictions = ChurnPrediction.query.filter_by(
+        customer_id=customer_uuid
+    ).order_by(ChurnPrediction.as_of_date.asc()).limit(limit).all()
+    
+    history = []
+    for pred in predictions:
+        history.append({
+            "pred_id": str(pred.pred_id),
+            "risk_score": round(pred.churn_score, 3),
+            "risk_label": pred.churn_label,
+            "as_of_date": pred.as_of_date.isoformat() if pred.as_of_date else None,
+            "model_version": pred.model_version
+        })
+    
+    return jsonify({
+        "customer_id": str(customer_uuid),
+        "total": len(history),
+        "history": history
+    })

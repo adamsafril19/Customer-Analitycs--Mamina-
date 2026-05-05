@@ -78,12 +78,12 @@ function ChurnRisk() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            Churn Risk Management
+            Risk Prioritization
           </h1>
           <p className="text-gray-500 mt-1">
             {total > 0
               ? `${total} customer berisiko`
-              : "Pantau customer berisiko churn"}
+              : "Pantau customer berdasarkan tingkat risiko"}
           </p>
         </div>
       </div>
@@ -154,7 +154,7 @@ function ChurnRisk() {
             <Table.Header>
               <Table.Row>
                 <Table.Head>Customer</Table.Head>
-                <Table.Head>Skor Churn</Table.Head>
+                <Table.Head>Risk Score</Table.Head>
                 <Table.Head>Risk Level</Table.Head>
                 <Table.Head>Alasan Utama</Table.Head>
                 <Table.Head>Prediksi Terakhir</Table.Head>
@@ -177,22 +177,22 @@ function ChurnRisk() {
                       <div className="w-16 bg-gray-200 rounded-full h-2">
                         <div
                           className={`h-2 rounded-full ${
-                            prediction.churn_score > 0.7
+                            prediction.risk_score > 0.7
                               ? "bg-red-500"
-                              : prediction.churn_score > 0.4
+                              : prediction.risk_score > 0.4
                               ? "bg-yellow-500"
                               : "bg-green-500"
                           }`}
-                          style={{ width: `${prediction.churn_score * 100}%` }}
+                          style={{ width: `${prediction.risk_score * 100}%` }}
                         />
                       </div>
                       <span className="text-sm font-semibold">
-                        {(prediction.churn_score * 100).toFixed(0)}%
+                        {(prediction.risk_score * 100).toFixed(0)}%
                       </span>
                     </div>
                   </Table.Cell>
                   <Table.Cell>
-                    <RiskLevelBadge level={prediction.churn_label} />
+                    <RiskLevelBadge level={prediction.risk_label} />
                   </Table.Cell>
                   <Table.Cell className="text-gray-500 max-w-xs">
                     {truncate(prediction.top_reason, 40)}

@@ -27,17 +27,17 @@ function CustomerCard({ customer }) {
             </div>
           </div>
         </div>
-        <RiskLevelBadge score={customer.churn_score} />
+        <RiskLevelBadge score={customer.risk_score} />
       </div>
 
       <div className="mb-3">
         <div className="flex items-center justify-between text-sm text-gray-500 mb-1">
-          <span>Risiko Churn</span>
+          <span>Risk Score</span>
           <span className="font-medium">
-            {(customer.churn_score * 100).toFixed(0)}%
+            {(customer.risk_score * 100).toFixed(0)}%
           </span>
         </div>
-        <ChurnScoreBadge score={customer.churn_score} showLabel={false} />
+        <ChurnScoreBadge score={customer.risk_score} showLabel={false} />
       </div>
 
       <div className="flex items-center justify-between text-sm">

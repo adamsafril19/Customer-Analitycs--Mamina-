@@ -14,7 +14,7 @@ import { cn } from "../../lib/utils";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Customers", href: "/customers", icon: Users },
-  { name: "Churn Risk", href: "/churn", icon: AlertTriangle },
+  { name: "Risk Analysis", href: "/risk", icon: AlertTriangle },
   { name: "Actions", href: "/actions", icon: ClipboardList },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
@@ -93,7 +93,7 @@ function SidebarContent() {
           </div>
           <div>
             <span className="text-xl font-bold text-gray-900">Mamina</span>
-            <p className="text-xs text-gray-500">Churn Prediction</p>
+            <p className="text-xs text-gray-500">Risk Scoring</p>
           </div>
         </div>
       </div>

@@ -11,8 +11,21 @@ import {
   Clock,
   Plus,
   History,
+  TrendingDown,
+  TrendingUp,
+  Activity,
+  BarChart3,
 } from "lucide-react";
-import { useCustomer360, useCustomerTimeline } from "../hooks/useCustomers";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import { useCustomer360, useCustomerTimeline, useCustomerRiskHistory } from "../hooks/useCustomers";
 import { useCustomerActions } from "../hooks/useActions";
 import ChurnScoreBadge from "../components/customer/ChurnScoreBadge";
 import RiskLevelBadge from "../components/customer/RiskLevelBadge";
@@ -29,6 +42,7 @@ import {
   maskPhone,
   getRiskLevel,
   getRiskColors,
+  FEATURE_LABELS,
   EXPLAINABILITY_MAP,
   ACTION_SUGGESTIONS,
   getSentimentEmoji,
@@ -48,6 +62,7 @@ function CustomerDetail() {
     activeTab
   );
   const { data: actions } = useCustomerActions(id);
+  const { data: riskHistory } = useCustomerRiskHistory(id);
 
   if (isLoading) {
     return (
@@ -81,6 +96,10 @@ function CustomerDetail() {
     quick_stats,
     transaction_summary,
     sentiment_summary,
+    numeric_features,
+    text_signals,
+    text_semantics,
+    last_messages,
   } = data;
 
   // Map data if quick_stats doesn't exist (backward compatibility)
@@ -91,11 +110,11 @@ function CustomerDetail() {
       transaction_summary?.last_transaction_date ||
       customer.last_seen_at ||
       customer.created_at,
-    message_count: sentiment_summary?.neg_msg_count_30 || 0, // Fallback, should be total message count
+    message_count: sentiment_summary?.neg_msg_count_30 || 0,
     avg_sentiment_30: sentiment_summary?.avg_sentiment_30 || 0,
   };
 
-  const riskLevel = getRiskLevel(latest_prediction?.churn_score || 0);
+  const riskLevel = getRiskLevel(latest_prediction?.risk_score || 0);
   const riskColors = getRiskColors(riskLevel);
   const suggestions = ACTION_SUGGESTIONS[riskLevel] || [];
 
@@ -109,21 +128,17 @@ function CustomerDetail() {
         getDetail: () => reason.description,
       };
 
-      // Calculate impact label
-      const impactLevel =
-        Math.abs(reason.impact) > 0.2
-          ? "high"
-          : Math.abs(reason.impact) > 0.1
-          ? "medium"
-          : "low";
+      let detail = "";
+      let impactLevel = "low";
 
-      // Get detail text - use description as fallback if value is not provided
-      let detail;
       try {
-        if (reason.value !== undefined && reason.value !== null) {
+        const absImpact = Math.abs(reason.impact || 0);
+        impactLevel =
+          absImpact > 0.2 ? "high" : absImpact > 0.1 ? "medium" : "low";
+
+        if (mapping.getDetail) {
           detail = mapping.getDetail(reason.value, reason.impact);
         } else {
-          // Fallback to description from backend
           const impactLabel =
             impactLevel === "high"
               ? "Tinggi"
@@ -133,132 +148,138 @@ function CustomerDetail() {
           detail = `Impact: ${impactLabel} | ${reason.description}`;
         }
       } catch {
-        detail = reason.description || "Faktor yang mempengaruhi churn";
+        detail = reason.description || "Faktor yang mempengaruhi risiko";
       }
 
       return {
-        ...reason,
         icon: mapping.icon,
-        title: mapping.title,
+        title: mapping.title || FEATURE_LABELS[reason.feature] || reason.feature,
         detail,
         impactLevel,
       };
     });
 
+  // Risk history chart data
+  const riskHistoryData = (riskHistory?.history || []).map((h) => ({
+    date: h.as_of_date,
+    risk_score: h.risk_score,
+  }));
+
   return (
     <div className="space-y-6">
-      {/* Back Button */}
+      {/* Back button */}
       <button
         onClick={() => navigate(-1)}
-        className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition"
       >
         <ArrowLeft className="h-5 w-5" />
-        <span>Kembali ke Customers</span>
+        <span>Kembali</span>
       </button>
 
-      {/* SECTION A: Customer Summary */}
+      {/* SECTION A: Customer Profile Header */}
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex flex-col lg:flex-row lg:items-start gap-6">
-          {/* Avatar & Info */}
-          <div className="flex items-start gap-4 flex-1">
-            <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-              <span className="text-blue-600 font-bold text-2xl">
-                {getInitials(customer.name)}
-              </span>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {customer.name}
-                </h1>
-                <RiskLevelBadge
-                  score={latest_prediction?.churn_score || 0}
-                  size="lg"
-                />
+          {/* Left: Profile Info */}
+          <div className="flex-1">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
+                <span className="text-blue-600 font-bold text-xl">
+                  {getInitials(customer.name)}
+                </span>
               </div>
-              <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
-                <div className="flex items-center gap-1">
-                  <Phone className="h-4 w-4" />
-                  <span>
-                    {maskPhone(customer.phone_display || customer.phone)}
+              <div>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    {customer.name}
+                  </h1>
+                  <RiskLevelBadge
+                    score={latest_prediction?.risk_score || 0}
+                    size="lg"
+                  />
+                </div>
+                <div className="flex items-center gap-4 text-gray-500 mt-1 flex-wrap">
+                  {customer.phone_display && (
+                    <span className="flex items-center gap-1 text-sm">
+                      <Phone className="h-4 w-4" />
+                      {maskPhone(customer.phone_display)}
+                    </span>
+                  )}
+                  {customer.email && (
+                    <span className="flex items-center gap-1 text-sm">
+                      <Mail className="h-4 w-4" />
+                      {customer.email}
+                    </span>
+                  )}
+                  {customer.city && (
+                    <span className="flex items-center gap-1 text-sm">
+                      <MapPin className="h-4 w-4" />
+                      {customer.city}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1 text-sm">
+                    <Calendar className="h-4 w-4" />
+                    Member sejak {formatDate(customer.created_at)}
                   </span>
                 </div>
-                {customer.email && (
-                  <div className="flex items-center gap-1">
-                    <Mail className="h-4 w-4" />
-                    <span>{customer.email}</span>
-                  </div>
-                )}
-                {customer.city && (
-                  <div className="flex items-center gap-1">
-                    <MapPin className="h-4 w-4" />
-                    <span>{customer.city}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-4 w-4" />
-                  <span>Member sejak {formatDate(customer.created_at)}</span>
-                </div>
+              </div>
+            </div>
+
+            {/* Quick Stats Row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <DollarSign className="h-5 w-5 text-green-600 mx-auto mb-1" />
+                <p className="text-lg font-semibold text-gray-900">
+                  {formatCurrency(stats.total_spent || 0)}
+                </p>
+                <p className="text-sm text-gray-500">Total Spent</p>
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <Clock className="h-5 w-5 text-blue-600 mx-auto mb-1" />
+                <p className="text-lg font-semibold text-gray-900">
+                  {formatRelativeTime(stats.last_visit)}
+                </p>
+                <p className="text-sm text-gray-500">Kunjungan Terakhir</p>
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <MessageSquare className="h-5 w-5 text-purple-600 mx-auto mb-1" />
+                <p className="text-lg font-semibold text-gray-900">
+                  {stats.message_count || 0}
+                </p>
+                <p className="text-sm text-gray-500">Pesan (30 hari)</p>
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <span className="text-xl block mb-1">
+                  {getSentimentEmoji(stats.avg_sentiment_30 || 0)}
+                </span>
+                <p
+                  className={`text-lg font-semibold ${getSentimentColor(
+                    stats.avg_sentiment_30 || 0
+                  )}`}
+                >
+                  {((stats.avg_sentiment_30 || 0) * 100).toFixed(0)}%
+                </p>
+                <p className="text-sm text-gray-500">Sentimen (30 hari)</p>
               </div>
             </div>
           </div>
 
-          {/* Churn Score Display */}
+          {/* Right: Risk Score Display */}
           <div className={`p-4 rounded-lg ${riskColors.bg} w-full lg:w-64`}>
             <p className="text-sm font-medium text-gray-600 mb-2">
-              Risiko Churn
+              Risk Score
             </p>
             <div className="mb-2">
               <ChurnScoreBadge
-                score={latest_prediction?.churn_score || 0}
+                score={latest_prediction?.risk_score || 0}
                 size="lg"
               />
             </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Model: {latest_prediction?.model_version || "-"}
+            </p>
             <p className="text-xs text-gray-500">
-              Terakhir diperbarui:{" "}
-              {formatRelativeTime(latest_prediction?.created_at)}
+              Prediksi: {formatDate(latest_prediction?.as_of_date)}
             </p>
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t">
-          <div className="text-center p-4 bg-gray-50 rounded-lg">
-            <DollarSign className="h-6 w-6 text-green-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-gray-900">
-              {stats?.total_transactions || 0}
-            </p>
-            <p className="text-sm text-gray-500">Total Transaksi</p>
-            <p className="text-xs text-gray-400 mt-1">
-              {formatCurrency(stats?.total_spent || 0)}
-            </p>
-          </div>
-          <div className="text-center p-4 bg-gray-50 rounded-lg">
-            <Clock className="h-6 w-6 text-blue-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-gray-900">
-              {stats?.last_visit ? formatRelativeTime(stats.last_visit) : "-"}
-            </p>
-            <p className="text-sm text-gray-500">Kunjungan Terakhir</p>
-          </div>
-          <div className="text-center p-4 bg-gray-50 rounded-lg">
-            <MessageSquare className="h-6 w-6 text-purple-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-gray-900">
-              {stats?.message_count || 0}
-            </p>
-            <p className="text-sm text-gray-500">Total Pesan</p>
-          </div>
-          <div className="text-center p-4 bg-gray-50 rounded-lg">
-            <span className="text-3xl block mb-1">
-              {getSentimentEmoji(stats?.avg_sentiment_30 || 0)}
-            </span>
-            <p
-              className={`text-xl font-bold ${getSentimentColor(
-                stats?.avg_sentiment_30 || 0
-              )}`}
-            >
-              {((stats?.avg_sentiment_30 || 0) * 100).toFixed(0)}%
-            </p>
-            <p className="text-sm text-gray-500">Sentimen (30 hari)</p>
           </div>
         </div>
       </div>
@@ -267,7 +288,7 @@ function CustomerDetail() {
       {topReasons.length > 0 && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Mengapa Berisiko Churn?
+            Mengapa Berisiko?
           </h2>
           <div className="space-y-3">
             {topReasons.map((reason, idx) => (
@@ -307,6 +328,202 @@ function CustomerDetail() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION B2: Profil Risiko & Sinyal Perilaku (NEW — Phase 4) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Profil Risiko (numeric_features) */}
+        {numeric_features && Object.keys(numeric_features).length > 0 && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-blue-600" />
+              Profil Risiko
+            </h2>
+            <div className="space-y-3">
+              {Object.entries(numeric_features)
+                .filter(([key]) => key !== "as_of_date")
+                .map(([key, value]) => {
+                  const label = FEATURE_LABELS[key] || key.replace(/_/g, " ");
+                  const isMonetary = ["spend_90d", "avg_tx_value"].includes(key);
+                  const displayValue = isMonetary
+                    ? formatCurrency(value || 0)
+                    : typeof value === "number"
+                    ? value.toFixed(2)
+                    : value || "-";
+
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                    >
+                      <span className="text-sm text-gray-600">{label}</span>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {displayValue}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* Sinyal Perilaku (text_signals + text_semantics) */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-purple-600" />
+            Sinyal Perilaku
+          </h2>
+          <div className="space-y-4">
+            {/* Text Signals */}
+            {text_signals && Object.keys(text_signals).length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Komunikasi</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {text_signals.msg_count_7d != null && (
+                    <div className="p-3 bg-blue-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-blue-800">{text_signals.msg_count_7d}</p>
+                      <p className="text-xs text-blue-600">Pesan 7 Hari</p>
+                    </div>
+                  )}
+                  {text_signals.msg_count_30d != null && (
+                    <div className="p-3 bg-blue-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-blue-800">{text_signals.msg_count_30d}</p>
+                      <p className="text-xs text-blue-600">Pesan 30 Hari</p>
+                    </div>
+                  )}
+                  {text_signals.complaint_rate_30d != null && (
+                    <div className={`p-3 rounded-lg text-center ${
+                      text_signals.complaint_rate_30d > 0.3 ? "bg-red-50" : "bg-green-50"
+                    }`}>
+                      <p className={`text-lg font-semibold ${
+                        text_signals.complaint_rate_30d > 0.3 ? "text-red-800" : "text-green-800"
+                      }`}>
+                        {(text_signals.complaint_rate_30d * 100).toFixed(0)}%
+                      </p>
+                      <p className={`text-xs ${
+                        text_signals.complaint_rate_30d > 0.3 ? "text-red-600" : "text-green-600"
+                      }`}>
+                        Rasio Komplain
+                      </p>
+                    </div>
+                  )}
+                  {text_signals.response_delay_mean != null && (
+                    <div className="p-3 bg-gray-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-gray-800">
+                        {(text_signals.response_delay_mean / 3600).toFixed(1)}h
+                      </p>
+                      <p className="text-xs text-gray-600">Avg Respon</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Sentiment Distribution */}
+            {text_semantics?.sentiment_dist && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Distribusi Sentimen</h3>
+                <div className="flex gap-2">
+                  {Object.entries(text_semantics.sentiment_dist).map(([label, count]) => {
+                    const colors = {
+                      positive: "bg-green-100 text-green-800",
+                      neutral: "bg-gray-100 text-gray-800",
+                      negative: "bg-red-100 text-red-800",
+                    };
+                    return (
+                      <div key={label} className={`flex-1 p-2 rounded-lg text-center ${colors[label] || "bg-gray-100 text-gray-800"}`}>
+                        <p className="text-lg font-semibold">{count}</p>
+                        <p className="text-xs capitalize">{label}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Last Messages */}
+            {last_messages && last_messages.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Pesan Terakhir</h3>
+                <div className="space-y-2">
+                  {last_messages.slice(0, 3).map((msg, idx) => (
+                    <div key={idx} className={`p-2 rounded text-sm border-l-3 ${
+                      msg.sentiment_label === "negative"
+                        ? "border-l-red-400 bg-red-50"
+                        : msg.sentiment_label === "positive"
+                        ? "border-l-green-400 bg-green-50"
+                        : "border-l-gray-300 bg-gray-50"
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        {msg.sentiment_label && (
+                          <Badge color={
+                            msg.sentiment_label === "negative" ? "red" :
+                            msg.sentiment_label === "positive" ? "green" : "gray"
+                          } className="text-xs">
+                            {msg.sentiment_label}
+                          </Badge>
+                        )}
+                        {msg.has_complaint && <Badge color="red" className="text-xs">Komplain</Badge>}
+                      </div>
+                      <p className="text-gray-700 text-xs">{msg.text_snippet}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {(!text_signals || Object.keys(text_signals).length === 0) &&
+             (!text_semantics || Object.keys(text_semantics).length === 0) &&
+             (!last_messages || last_messages.length === 0) && (
+              <p className="text-sm text-gray-400 text-center py-4">
+                Belum ada data sinyal perilaku
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION B3: Risk Score History (NEW — Phase 4) */}
+      {riskHistoryData.length > 1 && (
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <TrendingDown className="h-5 w-5 text-red-500" />
+            Histori Risk Score
+          </h2>
+          <div className="h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={riskHistoryData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={{ stroke: "#e5e7eb" }}
+                />
+                <YAxis
+                  domain={[0, 1]}
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={{ stroke: "#e5e7eb" }}
+                  tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                />
+                <Tooltip
+                  formatter={(v) => [`${(v * 100).toFixed(1)}%`, "Risk Score"]}
+                  labelFormatter={(l) => `Tanggal: ${l}`}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="risk_score"
+                  stroke="#ef4444"
+                  strokeWidth={2}
+                  dot={{ r: 4, fill: "#ef4444" }}
+                  activeDot={{ r: 6, strokeWidth: 2 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
       )}

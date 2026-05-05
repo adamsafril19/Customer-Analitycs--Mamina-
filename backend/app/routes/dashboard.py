@@ -32,9 +32,9 @@ def get_dashboard_stats():
         low_risk = ChurnPrediction.query.filter_by(churn_label="low").count()
         
         total_predictions = high_risk + medium_risk + low_risk
-        churn_rate = (high_risk / total_predictions * 100) if total_predictions > 0 else 0
+        high_risk_rate = (high_risk / total_predictions * 100) if total_predictions > 0 else 0
         
-        avg_churn_score = db.session.query(
+        avg_risk_score = db.session.query(
             func.avg(ChurnPrediction.churn_score)
         ).scalar() or 0
         
@@ -49,12 +49,12 @@ def get_dashboard_stats():
             "success": True,
             "data": {
                 "total_customers": total_customers,
-                "churn_rate": round(churn_rate, 2),
+                "high_risk_rate": round(high_risk_rate, 2),
                 "high_risk_count": high_risk,
                 "at_risk_count": high_risk,
                 "medium_risk_count": medium_risk,
                 "low_risk_count": low_risk,
-                "avg_churn_score": round(float(avg_churn_score), 3),
+                "avg_risk_score": round(float(avg_risk_score), 3),
                 "new_predictions_7d": new_predictions_7d,
                 "pending_actions": pending_actions,
                 "last_updated": datetime.utcnow().isoformat()
@@ -98,7 +98,7 @@ def get_churn_trend():
                 "date": str(pred.date),
                 "total": pred.total,
                 "high_risk": pred.high_risk or 0,
-                "churn_rate": round((pred.high_risk or 0) / pred.total * 100, 2) if pred.total > 0 else 0
+                "risk_rate": round((pred.high_risk or 0) / pred.total * 100, 2) if pred.total > 0 else 0
             })
         
         return jsonify({"success": True, "data": trend_data}), 200
@@ -182,8 +182,8 @@ def get_at_risk_customers():
             customers.append({
                 "customer_id": str(customer.customer_id),
                 "name": customer.name,
-                "churn_score": round(prediction.churn_score, 3),
-                "churn_label": prediction.churn_label,
+                "risk_score": round(prediction.churn_score, 3),
+                "risk_label": prediction.churn_label,
                 "created_at": customer.created_at.isoformat() if customer.created_at else None
             })
         

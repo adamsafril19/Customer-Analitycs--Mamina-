@@ -80,8 +80,8 @@ def predict_customer(customer_id: str):
     
     return jsonify({
         "customer_id": str(customer_id),
-        "churn_score": round(churn_score, 4),
-        "churn_label": churn_label,
+        "risk_score": round(churn_score, 4),
+        "risk_label": churn_label,
         "model_version": ml_service.get_model_version(),
         "as_of_date": today.isoformat(),
         "shap_values": shap_values

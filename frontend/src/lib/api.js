@@ -70,6 +70,8 @@ export const customersAPI = {
   get360: (id) => api.get(`/customers/${id}/360`),
   getTimeline: (id, type = "transactions", limit = 10) =>
     api.get(`/customers/${id}/timeline`, { params: { type, limit } }),
+  getRiskHistory: (id, limit = 20) =>
+    api.get(`/customers/${id}/risk-history`, { params: { limit } }),
   create: (data) => api.post("/customers", data),
   update: (id, data) => api.put(`/customers/${id}`, data),
   delete: (id) => api.delete(`/customers/${id}`),

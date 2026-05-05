@@ -67,7 +67,7 @@ function Login() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Mamina</h1>
             <p className="text-gray-500 mt-1">
-              Customer Churn Prediction Dashboard
+              Behavioral Risk Scoring Dashboard
             </p>
           </div>
 
