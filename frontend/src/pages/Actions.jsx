@@ -102,46 +102,46 @@ function Actions() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 text-blue-600" />
+          <h1 className="text-2xl font-bold text-primary-800 flex items-center gap-2">
+            <ClipboardList className="h-6 w-6 text-primary-600" />
             Follow-Up Actions
           </h1>
-          <p className="text-gray-500 mt-1">Kelola tindak lanjut customer</p>
+          <p className="text-stone-500 mt-1 font-medium">Kelola tindak lanjut customer</p>
         </div>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <Clock className="h-8 w-8 text-yellow-600" />
+            <Clock className="h-8 w-8 text-amber-600" />
             <div>
-              <p className="text-2xl font-bold text-yellow-700">
+              <p className="text-2xl font-bold text-amber-700">
                 {stats.pending}
               </p>
-              <p className="text-sm text-yellow-600">Menunggu</p>
+              <p className="text-sm text-amber-600 font-medium">Menunggu</p>
             </div>
           </div>
         </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-primary-50 border border-primary-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-8 w-8 text-blue-600" />
+            <Loader2 className="h-8 w-8 text-primary-600" />
             <div>
-              <p className="text-2xl font-bold text-blue-700">
+              <p className="text-2xl font-bold text-primary-700">
                 {stats.in_progress}
               </p>
-              <p className="text-sm text-blue-600">Sedang Dikerjakan</p>
+              <p className="text-sm text-primary-600 font-medium">Sedang Dikerjakan</p>
             </div>
           </div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <Check className="h-8 w-8 text-green-600" />
+            <Check className="h-8 w-8 text-emerald-600" />
             <div>
-              <p className="text-2xl font-bold text-green-700">
+              <p className="text-2xl font-bold text-emerald-700">
                 {stats.completed}
               </p>
-              <p className="text-sm text-green-600">Selesai</p>
+              <p className="text-sm text-emerald-600 font-medium">Selesai</p>
             </div>
           </div>
         </div>
@@ -152,7 +152,7 @@ function Actions() {
         <div className="flex flex-wrap items-center gap-4">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-gray-400" />
+            <Filter className="h-5 w-5 text-primary-400" />
             <select
               value={status}
               onChange={(e) => handleFilterChange("status", e.target.value)}
@@ -221,7 +221,7 @@ function Actions() {
                       onClick={() =>
                         navigate(`/customers/${action.customer_id}`)
                       }
-                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      className="font-medium text-primary-600 hover:text-primary-800 hover:underline"
                     >
                       {action.customer_name}
                     </button>
@@ -242,10 +242,10 @@ function Actions() {
                       {ACTION_STATUS_LABELS[action.status] || action.status}
                     </span>
                   </Table.Cell>
-                  <Table.Cell className="text-gray-500">
+                  <Table.Cell className="text-stone-500">
                     {formatDate(action.due_date)}
                   </Table.Cell>
-                  <Table.Cell className="text-gray-500 max-w-xs truncate">
+                  <Table.Cell className="text-stone-500 max-w-xs truncate">
                     {action.notes || "-"}
                   </Table.Cell>
                   <Table.Cell className="text-right">
@@ -255,7 +255,7 @@ function Actions() {
                           onClick={() =>
                             handleStatusUpdate(action.action_id, "in_progress")
                           }
-                          className="p-1 text-blue-600 hover:text-blue-800"
+                          className="p-2 text-primary-600 hover:text-primary-800 hover:bg-primary-50 rounded-lg transition-colors"
                           title="Mulai Kerjakan"
                         >
                           <Loader2 className="h-5 w-5" />
@@ -296,7 +296,7 @@ function Actions() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-stone-500">
             Menampilkan {(page - 1) * limit + 1}-{Math.min(page * limit, total)}{" "}
             dari {total}
           </p>

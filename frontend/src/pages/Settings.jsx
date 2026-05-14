@@ -77,11 +77,11 @@ function Settings() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <SettingsIcon className="h-6 w-6 text-gray-600" />
+        <h1 className="text-2xl font-bold text-primary-900 flex items-center gap-2">
+          <SettingsIcon className="h-6 w-6 text-stone-600" />
           Settings
         </h1>
-        <p className="text-gray-500 mt-1">Konfigurasi aplikasi</p>
+        <p className="text-stone-500 mt-1">Konfigurasi aplikasi</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -95,7 +95,7 @@ function Settings() {
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-md text-left transition ${
                   activeTab === tab.id
                     ? "bg-blue-50 text-blue-600"
-                    : "text-gray-600 hover:bg-gray-50"
+                    : "text-stone-600 hover:bg-primary-50"
                 }`}
               >
                 <tab.icon className="h-5 w-5" />
@@ -110,9 +110,17 @@ function Settings() {
           {activeTab === "threshold" && (
             <Card>
               <Card.Header>
-                <Card.Title>Risk Score Threshold</Card.Title>
+                <div className="flex items-center gap-3">
+                  <Card.Title>Risk Score Threshold</Card.Title>
+                  <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded border border-purple-200">
+                    Prototype
+                  </span>
+                </div>
                 <Card.Description>
-                  Atur batas skor untuk kategori risiko
+                  Atur batas skor untuk kategori risiko. <br />
+                  <span className="text-yellow-600 font-medium mt-1 inline-block">
+                    Perhatian: Pengaturan ini hanya untuk keperluan demonstrasi/prototype (belum memengaruhi pipeline ML di backend).
+                  </span>
                 </Card.Description>
               </Card.Header>
               <Card.Content>
@@ -134,11 +142,11 @@ function Settings() {
                         }
                         className="flex-1"
                       />
-                      <span className="w-20 text-center font-mono bg-gray-100 px-3 py-2 rounded">
+                      <span className="w-20 text-center font-mono bg-primary-100 px-3 py-2 rounded">
                         &lt; {(thresholds.low * 100).toFixed(0)}%
                       </span>
                     </div>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="text-sm text-stone-500 mt-1">
                       Customer dengan skor di bawah ini dianggap risiko rendah
                     </p>
                   </div>
@@ -172,11 +180,11 @@ function Settings() {
                         }
                         className="flex-1"
                       />
-                      <span className="w-20 text-center font-mono bg-gray-100 px-3 py-2 rounded">
+                      <span className="w-20 text-center font-mono bg-primary-100 px-3 py-2 rounded">
                         &gt; {(thresholds.high * 100).toFixed(0)}%
                       </span>
                     </div>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="text-sm text-stone-500 mt-1">
                       Customer dengan skor di atas ini dianggap risiko tinggi
                     </p>
                   </div>
@@ -200,9 +208,9 @@ function Settings() {
                             value={option.value}
                             checked={timeWindow === option.value}
                             onChange={(e) => setTimeWindow(e.target.value)}
-                            className="w-4 h-4 text-blue-600"
+                            className="w-4 h-4 text-primary-600"
                           />
-                          <span className="text-gray-700">{option.label}</span>
+                          <span className="text-primary-800">{option.label}</span>
                         </label>
                       ))}
                     </div>
@@ -262,7 +270,7 @@ function Settings() {
                   </div>
 
                   <div className="pt-4 border-t">
-                    <h4 className="font-medium text-gray-900 mb-3">
+                    <h4 className="font-medium text-primary-900 mb-3">
                       Ubah Password
                     </h4>
                     <div className="space-y-3">

@@ -23,7 +23,7 @@ function Pagination({ currentPage, totalPages, onPageChange, className }) {
       <button
         onClick={() => onPageChange(currentPage - 1)}
         disabled={currentPage === 1}
-        className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="p-2 rounded-md hover:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <ChevronLeft className="h-5 w-5" />
       </button>
@@ -32,11 +32,11 @@ function Pagination({ currentPage, totalPages, onPageChange, className }) {
         <>
           <button
             onClick={() => onPageChange(1)}
-            className="px-3 py-1 rounded-md hover:bg-gray-100"
+            className="px-3 py-1 rounded-md hover:bg-primary-100"
           >
             1
           </button>
-          {startPage > 2 && <span className="px-2 text-gray-500">...</span>}
+          {startPage > 2 && <span className="px-2 text-stone-500">...</span>}
         </>
       )}
 
@@ -47,8 +47,8 @@ function Pagination({ currentPage, totalPages, onPageChange, className }) {
           className={cn(
             "px-3 py-1 rounded-md",
             page === currentPage
-              ? "bg-blue-600 text-white"
-              : "hover:bg-gray-100"
+              ? "bg-primary-600 text-white shadow-sm shadow-primary-500/30"
+              : "hover:bg-primary-100"
           )}
         >
           {page}
@@ -58,11 +58,11 @@ function Pagination({ currentPage, totalPages, onPageChange, className }) {
       {endPage < totalPages && (
         <>
           {endPage < totalPages - 1 && (
-            <span className="px-2 text-gray-500">...</span>
+            <span className="px-2 text-stone-500">...</span>
           )}
           <button
             onClick={() => onPageChange(totalPages)}
-            className="px-3 py-1 rounded-md hover:bg-gray-100"
+            className="px-3 py-1 rounded-md hover:bg-primary-100"
           >
             {totalPages}
           </button>
@@ -72,7 +72,7 @@ function Pagination({ currentPage, totalPages, onPageChange, className }) {
       <button
         onClick={() => onPageChange(currentPage + 1)}
         disabled={currentPage === totalPages}
-        className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="p-2 rounded-md hover:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <ChevronRight className="h-5 w-5" />
       </button>

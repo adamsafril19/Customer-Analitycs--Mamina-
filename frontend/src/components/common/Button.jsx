@@ -1,18 +1,20 @@
+// src/components/common/Button.jsx
 import { cn } from "../../lib/utils";
+import { Sparkles } from "lucide-react";
 
 const variants = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700",
-  secondary: "bg-gray-200 text-gray-800 hover:bg-gray-300",
-  danger: "bg-red-600 text-white hover:bg-red-700",
-  success: "bg-green-600 text-white hover:bg-green-700",
-  outline: "border border-gray-300 text-gray-700 hover:bg-gray-50",
-  ghost: "text-gray-700 hover:bg-gray-100",
+  primary: "bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-md shadow-pink-300/30 hover:shadow-pink-400/40 hover:-translate-y-0.5",
+  secondary: "bg-pink-100 text-pink-700 hover:bg-pink-200 hover:-translate-y-0.5",
+  danger: "bg-gradient-to-r from-rose-400 to-rose-500 text-white shadow-md shadow-rose-300/30 hover:shadow-rose-400/40 hover:-translate-y-0.5",
+  success: "bg-gradient-to-r from-emerald-400 to-emerald-500 text-white shadow-md shadow-emerald-300/30 hover:shadow-emerald-400/40 hover:-translate-y-0.5",
+  outline: "border-2 border-pink-200 text-pink-600 hover:bg-pink-50 bg-white/80 hover:-translate-y-0.5 shadow-sm",
+  ghost: "text-pink-600 hover:bg-pink-50",
 };
 
 const sizes = {
-  sm: "px-3 py-1.5 text-sm",
-  md: "px-4 py-2",
-  lg: "px-6 py-3 text-lg",
+  sm: "px-3 py-1.5 text-sm rounded-xl",
+  md: "px-4 py-2 rounded-xl",
+  lg: "px-6 py-3 text-lg rounded-2xl",
 };
 
 function Button({
@@ -28,7 +30,7 @@ function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 font-medium rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-2 font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-pink-300 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95",
         variants[variant],
         sizes[size],
         className
@@ -59,7 +61,9 @@ function Button({
         </svg>
       ) : icon ? (
         icon
-      ) : null}
+      ) : (
+        variant === "primary" && <Sparkles className="h-4 w-4" />
+      )}
       {children}
     </button>
   );

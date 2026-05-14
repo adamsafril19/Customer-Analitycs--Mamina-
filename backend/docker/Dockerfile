@@ -11,13 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_RETRIES=10
+RUN pip install --no-cache-dir --user --timeout 120 --retries 10 -r requirements.txt
 
 
 # Final stage
 FROM python:3.10-slim
 
 WORKDIR /app
+
+# Cache Hugging Face models in the image to avoid runtime downloads
+ENV HF_HOME=/app/.cache/huggingface \
+    TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers \
+    SENTENCE_TRANSFORMERS_HOME=/app/.cache/huggingface/sentence_transformers
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -35,11 +43,25 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+
 # Create directories
 RUN mkdir -p /app/logs /app/models && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
+
+# Pre-download HF models used by the backend
+RUN python - <<'PY'
+from sentence_transformers import SentenceTransformer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+AutoTokenizer.from_pretrained("Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis")
+AutoModelForSequenceClassification.from_pretrained(
+    "Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis"
+)
+print("HF models cached")
+PY
 
 # Expose port
 EXPOSE 5000

@@ -142,6 +142,7 @@ def register_blueprints(app: Flask) -> None:
     from app.routes.admin import admin_bp
     from app.routes.dashboard import dashboard_bp
     from app.routes.topics import topics_bp
+    from app.routes.import_routes import import_bp
     
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -151,6 +152,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(topics_bp, url_prefix="/api")
+    app.register_blueprint(import_bp, url_prefix="/api/import")
 
 
 def register_error_handlers(app: Flask) -> None:

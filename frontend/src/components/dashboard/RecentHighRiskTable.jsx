@@ -1,5 +1,6 @@
+// src/components/dashboard/RecentHighRiskTable.jsx
 import { useNavigate } from "react-router-dom";
-import { Eye } from "lucide-react";
+import { Eye, Baby } from "lucide-react";
 import Table from "../common/Table";
 import RiskLevelBadge from "../customer/RiskLevelBadge";
 import { formatRelativeTime } from "../../lib/utils";
@@ -9,30 +10,32 @@ function RecentHighRiskTable({ customers }) {
 
   if (!customers || customers.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+      <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-pink-100 shadow-md p-6">
+        <h3 className="text-lg font-bold bg-gradient-to-r from-rose-500 to-pink-500 bg-clip-text text-transparent mb-4 flex items-center gap-2">
+          <Baby className="h-5 w-5 text-pink-400" />
           Customer Berisiko Tinggi Terbaru
         </h3>
-        <div className="text-center py-8 text-gray-500">
-          Tidak ada customer berisiko tinggi
+        <div className="text-center py-8 text-stone-400 font-medium">
+          Tidak ada customer berisiko tinggi ✨
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+    <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-rose-100 shadow-md p-6 transition-all hover:shadow-lg">
+      <h3 className="text-lg font-bold bg-gradient-to-r from-rose-500 to-pink-500 bg-clip-text text-transparent mb-4 flex items-center gap-2">
+        <Baby className="h-5 w-5 text-pink-400" />
         Customer Berisiko Tinggi Terbaru
       </h3>
       <Table>
         <Table.Header>
-          <Table.Row>
-            <Table.Head>Nama</Table.Head>
-            <Table.Head>Kunjungan Terakhir</Table.Head>
-            <Table.Head>Skor</Table.Head>
-            <Table.Head>Status</Table.Head>
-            <Table.Head className="text-right">Aksi</Table.Head>
+          <Table.Row className="bg-pink-50/50 rounded-xl">
+            <Table.Head className="text-pink-600 font-semibold">Nama</Table.Head>
+            <Table.Head className="text-pink-600 font-semibold">Kunjungan Terakhir</Table.Head>
+            <Table.Head className="text-pink-600 font-semibold">Skor</Table.Head>
+            <Table.Head className="text-pink-600 font-semibold">Status</Table.Head>
+            <Table.Head className="text-right text-pink-600 font-semibold">Aksi</Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -40,16 +43,17 @@ function RecentHighRiskTable({ customers }) {
             <Table.Row
               key={customer.customer_id}
               onClick={() => navigate(`/customers/${customer.customer_id}`)}
+              className="cursor-pointer hover:bg-pink-50/30 transition-colors"
             >
-              <Table.Cell className="font-medium text-gray-900">
+              <Table.Cell className="font-medium text-stone-700">
                 {customer.name}
               </Table.Cell>
-              <Table.Cell className="text-gray-500">
+              <Table.Cell className="text-stone-500">
                 {formatRelativeTime(
                   customer.last_visit || customer.last_seen_at
                 )}
               </Table.Cell>
-              <Table.Cell className="font-semibold text-red-600">
+              <Table.Cell className="font-bold text-rose-500">
                 {customer.risk_score != null
                   ? `${(customer.risk_score * 100).toFixed(0)}%`
                   : "-"}
@@ -63,7 +67,7 @@ function RecentHighRiskTable({ customers }) {
                     e.stopPropagation();
                     navigate(`/customers/${customer.customer_id}`);
                   }}
-                  className="text-blue-600 hover:text-blue-800 p-1"
+                  className="text-pink-400 hover:text-pink-600 p-2 hover:bg-pink-100 rounded-full transition-colors"
                 >
                   <Eye className="h-5 w-5" />
                 </button>

@@ -1,9 +1,13 @@
+// src/components/common/Skeleton.jsx
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
+// Customize skeleton colors to baby spa theme (optional, via CSS)
+// Anda bisa tambahkan style global: .react-loading-skeleton { --base-color: #fce7f3; --highlight-color: #fbcfe8; }
+
 export function CardSkeleton() {
   return (
-    <div className="bg-white p-6 rounded-lg shadow">
+    <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-pink-100 p-6 shadow-md">
       <Skeleton height={20} width="40%" className="mb-2" />
       <Skeleton height={36} width="60%" />
     </div>
@@ -24,7 +28,7 @@ export function TableRowSkeleton({ columns = 5 }) {
 
 export function CustomerCardSkeleton() {
   return (
-    <div className="bg-white p-6 rounded-lg shadow">
+    <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-pink-100 p-6 shadow-md">
       <div className="flex items-center gap-4 mb-4">
         <Skeleton circle height={48} width={48} />
         <div className="flex-1">
@@ -39,7 +43,7 @@ export function CustomerCardSkeleton() {
 
 export function ChartSkeleton({ height = 300 }) {
   return (
-    <div className="bg-white p-6 rounded-lg shadow">
+    <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-purple-100 p-5 shadow-md">
       <Skeleton height={24} width="40%" className="mb-4" />
       <Skeleton height={height} />
     </div>
@@ -49,7 +53,7 @@ export function ChartSkeleton({ height = 300 }) {
 export function DetailSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-lg shadow">
+      <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-pink-100 p-6 shadow-md">
         <div className="flex items-center gap-4 mb-6">
           <Skeleton circle height={80} width={80} />
           <div className="flex-1">
@@ -59,7 +63,7 @@ export function DetailSkeleton() {
         </div>
         <Skeleton height={100} />
       </div>
-      <div className="bg-white p-6 rounded-lg shadow">
+      <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-purple-100 p-6 shadow-md">
         <Skeleton height={24} width="40%" className="mb-4" />
         <Skeleton count={5} className="mb-2" />
       </div>

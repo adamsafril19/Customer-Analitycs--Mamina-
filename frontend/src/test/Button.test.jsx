@@ -33,7 +33,7 @@ describe("Button", () => {
     const { container } = render(
       <Button variant="secondary">Secondary</Button>
     );
-    expect(container.querySelector(".bg-gray-200")).toBeInTheDocument();
+    expect(container.querySelector(".bg-primary-200")).toBeInTheDocument();
   });
 
   it("applies danger variant", () => {

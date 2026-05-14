@@ -76,11 +76,11 @@ function ChurnRisk() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-primary-900 flex items-center gap-2">
             <AlertTriangle className="h-6 w-6 text-red-500" />
             Risk Prioritization
           </h1>
-          <p className="text-gray-500 mt-1">
+          <p className="text-stone-500 mt-1">
             {total > 0
               ? `${total} customer berisiko`
               : "Pantau customer berdasarkan tingkat risiko"}
@@ -92,7 +92,7 @@ function ChurnRisk() {
       <div className="bg-white rounded-lg shadow-md p-4">
         <div className="flex flex-wrap items-center gap-4">
           {/* Risk Level Tabs */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-primary-100 rounded-lg p-1">
             {[
               { value: "", label: "Semua" },
               { value: "high", label: "Tinggi (>0.7)" },
@@ -105,7 +105,7 @@ function ChurnRisk() {
                 className={`px-4 py-2 rounded-md text-sm font-medium transition ${
                   label === option.value
                     ? "bg-white shadow text-blue-600"
-                    : "text-gray-600 hover:text-gray-900"
+                    : "text-stone-600 hover:text-primary-900"
                 }`}
               >
                 {option.label}
@@ -115,7 +115,7 @@ function ChurnRisk() {
 
           {/* Sort */}
           <div className="flex items-center gap-2 ml-auto">
-            <Filter className="h-5 w-5 text-gray-400" />
+            <Filter className="h-5 w-5 text-primary-400" />
             <select
               value={sort}
               onChange={(e) => handleFilterChange("sort", e.target.value)}
@@ -169,12 +169,12 @@ function ChurnRisk() {
                     navigate(`/customers/${prediction.customer_id}`)
                   }
                 >
-                  <Table.Cell className="font-medium text-gray-900">
+                  <Table.Cell className="font-medium text-primary-900">
                     {prediction.customer_name}
                   </Table.Cell>
                   <Table.Cell>
                     <div className="flex items-center gap-2">
-                      <div className="w-16 bg-gray-200 rounded-full h-2">
+                      <div className="w-16 bg-primary-200 rounded-full h-2">
                         <div
                           className={`h-2 rounded-full ${
                             prediction.risk_score > 0.7
@@ -194,10 +194,10 @@ function ChurnRisk() {
                   <Table.Cell>
                     <RiskLevelBadge level={prediction.risk_label} />
                   </Table.Cell>
-                  <Table.Cell className="text-gray-500 max-w-xs">
+                  <Table.Cell className="text-stone-500 max-w-xs">
                     {truncate(prediction.top_reason, 40)}
                   </Table.Cell>
-                  <Table.Cell className="text-gray-500">
+                  <Table.Cell className="text-stone-500">
                     {formatRelativeTime(prediction.created_at)}
                   </Table.Cell>
                   <Table.Cell className="text-right">
@@ -234,7 +234,7 @@ function ChurnRisk() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-stone-500">
             Menampilkan {(page - 1) * limit + 1}-{Math.min(page * limit, total)}{" "}
             dari {total}
           </p>

@@ -108,6 +108,8 @@ class ChurnPrediction(db.Model):
         return {
             "pred_id": str(self.pred_id),
             "customer_id": str(self.customer_id),
+            "churn_score": self.churn_score,  # Backward compatibility
+            "churn_label": self.churn_label,  # Backward compatibility
             "risk_score": self.churn_score,
             "risk_label": self.churn_label,
             "model_version": self.model_version,

@@ -100,3 +100,21 @@ export const settingsAPI = {
   get: () => api.get("/settings"),
   update: (data) => api.put("/settings", data),
 };
+
+// Import API (CSV ingestion)
+const _uploadCSV = (url, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api.post(url, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
+export const importAPI = {
+  previewCustomers: (file) => _uploadCSV("/import/customers/preview", file),
+  importCustomers: (file) => _uploadCSV("/import/customers", file),
+  previewTransactions: (file) => _uploadCSV("/import/transactions/preview", file),
+  importTransactions: (file) => _uploadCSV("/import/transactions", file),
+  previewMessages: (file) => _uploadCSV("/import/messages/preview", file),
+  importMessages: (file) => _uploadCSV("/import/messages", file),
+};

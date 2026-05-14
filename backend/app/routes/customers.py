@@ -335,6 +335,8 @@ def list_customers():
         data = c.to_dict()
         pred = predictions.get(c.customer_id)
         if pred:
+            data["churn_score"] = round(pred.churn_score, 3) # Backward compatibility
+            data["churn_label"] = pred.churn_label           # Backward compatibility
             data["risk_score"] = round(pred.churn_score, 3)
             data["risk_label"] = pred.churn_label
         result.append(data)
@@ -438,12 +440,16 @@ def get_customer_risk_history(customer_id: str):
     
     predictions = ChurnPrediction.query.filter_by(
         customer_id=customer_uuid
-    ).order_by(ChurnPrediction.as_of_date.asc()).limit(limit).all()
+    ).order_by(ChurnPrediction.as_of_date.desc()).limit(limit).all()
+    
+    # Reverse to ensure chronological order (oldest to newest of the last N records)
+    predictions.reverse()
     
     history = []
     for pred in predictions:
         history.append({
             "pred_id": str(pred.pred_id),
+            "churn_score": round(pred.churn_score, 3), # Backward compatibility
             "risk_score": round(pred.churn_score, 3),
             "risk_label": pred.churn_label,
             "as_of_date": pred.as_of_date.isoformat() if pred.as_of_date else None,

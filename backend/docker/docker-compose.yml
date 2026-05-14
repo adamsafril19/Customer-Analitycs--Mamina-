@@ -88,7 +88,7 @@ services:
 
   # PostgreSQL Database
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg17
     container_name: mamina-db
     environment:
       - POSTGRES_USER=mamina

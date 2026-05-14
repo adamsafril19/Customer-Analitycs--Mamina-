@@ -48,12 +48,6 @@ class Customer(db.Model):
         lazy="dynamic",
         cascade="all, delete-orphan"
     )
-    feedback_raw = db.relationship(
-        "FeedbackRaw", 
-        back_populates="customer", 
-        lazy="dynamic",
-        cascade="all, delete-orphan"
-    )
     feedback_features = db.relationship(
         "FeedbackFeatures", 
         back_populates="customer", 

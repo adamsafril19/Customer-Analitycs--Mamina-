@@ -25,29 +25,29 @@ function CustomerTable({ customers }) {
           <Table.Row
             key={customer.customer_id}
             onClick={() => navigate(`/customers/${customer.customer_id}`)}
-            className="hover:bg-gray-50"
+            className="hover:bg-primary-50 transition-colors cursor-pointer"
           >
             <Table.Cell>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-blue-600 font-medium text-sm">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-100 to-primary-200 flex items-center justify-center flex-shrink-0 border border-primary-50">
+                  <span className="text-primary-700 font-bold text-sm">
                     {getInitials(customer.name)}
                   </span>
                 </div>
                 <div>
-                  <div className="font-medium text-gray-900">
+                  <div className="font-semibold text-primary-800">
                     {customer.name}
                   </div>
-                  <div className="text-gray-500 text-xs">
+                  <div className="text-stone-500 text-xs font-medium">
                     {customer.email || "-"}
                   </div>
                 </div>
               </div>
             </Table.Cell>
-            <Table.Cell className="text-gray-500">
+            <Table.Cell className="text-stone-500 font-medium">
               {customer.city || "-"}
             </Table.Cell>
-            <Table.Cell className="text-gray-500">
+            <Table.Cell className="text-stone-500 font-medium">
               {formatRelativeTime(customer.last_visit)}
             </Table.Cell>
             <Table.Cell>
@@ -64,7 +64,7 @@ function CustomerTable({ customers }) {
                   e.stopPropagation();
                   navigate(`/customers/${customer.customer_id}`);
                 }}
-                className="text-blue-600 hover:text-blue-800 p-1"
+                className="text-primary-600 hover:text-primary-800 p-2 hover:bg-primary-50 rounded-lg transition-colors"
               >
                 <Eye className="h-5 w-5" />
               </button>

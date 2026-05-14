@@ -25,7 +25,7 @@ function CardHeader({ children, className, ...props }) {
 function CardTitle({ children, className, ...props }) {
   return (
     <h3
-      className={cn("text-lg font-semibold text-gray-900", className)}
+      className={cn("text-lg font-semibold text-primary-900", className)}
       {...props}
     >
       {children}
@@ -35,7 +35,7 @@ function CardTitle({ children, className, ...props }) {
 
 function CardDescription({ children, className, ...props }) {
   return (
-    <p className={cn("text-sm text-gray-500 mt-1", className)} {...props}>
+    <p className={cn("text-sm text-stone-500 mt-1", className)} {...props}>
       {children}
     </p>
   );
@@ -52,7 +52,7 @@ function CardContent({ children, className, ...props }) {
 function CardFooter({ children, className, ...props }) {
   return (
     <div
-      className={cn("mt-4 pt-4 border-t border-gray-100", className)}
+      className={cn("mt-4 pt-4 border-t border-primary-100", className)}
       {...props}
     >
       {children}

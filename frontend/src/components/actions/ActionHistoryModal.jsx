@@ -21,7 +21,7 @@ function ActionHistoryModal({ isOpen, onClose, actions }) {
     >
       <div className="max-h-[500px] overflow-y-auto">
         {actions.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-stone-500">
             Belum ada action untuk customer ini
           </div>
         ) : (
@@ -29,7 +29,7 @@ function ActionHistoryModal({ isOpen, onClose, actions }) {
             {actions.map((action) => (
               <div
                 key={action.action_id}
-                className="p-4 border rounded-lg hover:bg-gray-50"
+                className="p-4 border rounded-lg hover:bg-primary-50"
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -48,23 +48,23 @@ function ActionHistoryModal({ isOpen, onClose, actions }) {
                       {PRIORITY_LABELS[action.priority] || action.priority}
                     </Badge>
                   </div>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-stone-500">
                     {formatRelativeTime(action.created_at)}
                   </span>
                 </div>
 
                 <div className="mb-2">
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-primary-900">
                     {ACTION_TYPE_LABELS[action.action_type] ||
                       action.action_type}
                   </span>
                 </div>
 
                 {action.notes && (
-                  <p className="text-sm text-gray-600 mb-2">{action.notes}</p>
+                  <p className="text-sm text-stone-600 mb-2">{action.notes}</p>
                 )}
 
-                <div className="flex items-center gap-4 text-xs text-gray-500">
+                <div className="flex items-center gap-4 text-xs text-stone-500">
                   <span>Deadline: {formatDate(action.due_date)}</span>
                   {action.assigned_to && (
                     <span>Assigned: {action.assigned_to}</span>

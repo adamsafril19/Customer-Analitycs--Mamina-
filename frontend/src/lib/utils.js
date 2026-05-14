@@ -204,31 +204,31 @@ export const EXPLAINABILITY_MAP = {
   },
   spend_90d: {
     icon: "💰",
-    title: "Pengeluaran dalam 90 hari",
+    title: "Pengeluaran dalam 90 Hari",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Rp ${(value || 0).toLocaleString("id-ID")}`,
   },
   avg_tx_value: {
     icon: "🧾",
-    title: "Rata-rata nilai transaksi",
+    title: "Rata-rata nilai transaksi menurun",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Rp ${(value || 0).toLocaleString("id-ID")}`,
   },
   tenure_days: {
     icon: "⚠️",
-    title: "Durasi berlangganan",
+    title: "Durasi berlangganan berisiko",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Bergabung ${Math.floor((value || 0) / 30)} bulan lalu`,
   },
   activity_mean: {
     icon: "📊",
-    title: "Tingkat aktivitas rata-rata",
+    title: "Tingkat aktivitas rata-rata rendah",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Rata-rata: ${value?.toFixed(1)} per window`,
   },
   recent_activity_avg: {
     icon: "📈",
-    title: "Aktivitas terkini",
+    title: "Aktivitas terkini menurun",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Aktivitas terkini: ${value?.toFixed(1)}`,
   },
@@ -258,7 +258,7 @@ export const EXPLAINABILITY_MAP = {
   },
   avg_sentiment_score: {
     icon: "😐",
-    title: "Sentimen rata-rata rendah",
+    title: "Sentimen rata-rata negatif",
     getDetail: (value, impact) =>
       `Impact: ${impactLabel(impact)} | Sentimen: ${((value || 0) * 100).toFixed(0)}%`,
   },
@@ -283,6 +283,50 @@ export const EXPLAINABILITY_MAP = {
     },
   },
 };
+
+/**
+ * Generate dynamic action suggestions based on top risk factors
+ */
+export function getDynamicActionSuggestions(topReasons = []) {
+  if (!topReasons || topReasons.length === 0) {
+    return [{ icon: "✅", text: "Pertahankan layanan baik (Routine Maintenance)", type: "none" }];
+  }
+
+  const suggestions = [];
+  const categoriesHit = new Set();
+
+  for (const reason of topReasons) {
+    const f = reason.feature;
+    // Categorize features
+    if (["avg_sentiment_score", "complaint_ratio", "sentiment_trend"].includes(f) && !categoriesHit.has("sentiment")) {
+      suggestions.push({ icon: "🎧", text: "Tindak Lanjuti Keluhan: Sentimen negatif terdeteksi. Hubungi untuk penyelesaian.", type: "contact" });
+      categoriesHit.add("sentiment");
+    }
+    if (["spend_trend_smoothed", "avg_tx_value", "spend_90d"].includes(f) && !categoriesHit.has("monetary")) {
+      suggestions.push({ icon: "🎁", text: "Tawarkan Promo/Bundling Khusus: Ada penurunan tren pengeluaran.", type: "offer" });
+      categoriesHit.add("monetary");
+    }
+    if (["frequency_trend_smoothed", "activity_mean", "recent_activity_avg", "trend_magnitude_interaction"].includes(f) && !categoriesHit.has("frequency")) {
+      suggestions.push({ icon: "📅", text: "Campaign Reaktivasi Rutin: Kirimkan pesan reminder jadwal kunjungan.", type: "campaign" });
+      categoriesHit.add("frequency");
+    }
+    if (["recency_ratio", "recency_days"].includes(f) && !categoriesHit.has("recency")) {
+      suggestions.push({ icon: "👋", text: "Sapaan Personal (Win-back): Sudah melebihi siklus kunjungan normal.", type: "contact" });
+      categoriesHit.add("recency");
+    }
+    if (["response_delay_mean"].includes(f) && !categoriesHit.has("admin")) {
+      suggestions.push({ icon: "⚡", text: "Evaluasi Internal SLA: Waktu balas admin lambat. Prioritaskan respon berikutnya.", type: "internal" });
+      categoriesHit.add("admin");
+    }
+  }
+
+  // Fallbacks if no specific category hit
+  if (suggestions.length === 0) {
+    suggestions.push({ icon: "🔍", text: "Lakukan review manual terhadap aktivitas pelanggan", type: "review" });
+  }
+
+  return suggestions;
+}
 
 /**
  * Action suggestions based on risk level
@@ -336,9 +380,9 @@ export const PRIORITY_LABELS = {
  */
 export function getPriorityColors(priority) {
   const colors = {
-    low: "bg-gray-100 text-gray-800",
-    medium: "bg-blue-100 text-blue-800",
-    high: "bg-red-100 text-red-800",
+    low: "bg-primary-100 text-primary-800",
+    medium: "bg-primary-100 text-primary-800",
+    high: "bg-rose-100 text-rose-800",
   };
   return colors[priority] || colors.low;
 }
@@ -348,10 +392,10 @@ export function getPriorityColors(priority) {
  */
 export function getStatusColors(status) {
   const colors = {
-    pending: "bg-yellow-100 text-yellow-800",
-    in_progress: "bg-blue-100 text-blue-800",
-    completed: "bg-green-100 text-green-800",
-    cancelled: "bg-gray-100 text-gray-800",
+    pending: "bg-amber-100 text-amber-800",
+    in_progress: "bg-primary-100 text-primary-800",
+    completed: "bg-emerald-100 text-emerald-800",
+    cancelled: "bg-primary-100 text-primary-800",
   };
   return colors[status] || colors.pending;
 }

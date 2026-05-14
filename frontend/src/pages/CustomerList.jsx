@@ -118,10 +118,10 @@ function CustomerList() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
-          <p className="text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-primary-800">Customers</h1>
+          <p className="text-stone-500 mt-1 font-medium">
             {sort === "risk_score"
-              ? "Diurutkan berdasarkan tingkat risiko tertinggi"
+              ? "Diurutkan berdasarkan tingkat risiko penurunan aktivitas tertinggi"
               : `${total > 0 ? `${total} customer ditemukan` : "Kelola data customer"}`}
           </p>
         </div>
@@ -130,7 +130,7 @@ function CustomerList() {
             variant={risk === "high" ? "primary" : "outline"}
             icon={<AlertTriangle className="h-4 w-4" />}
             onClick={handleHighRiskFilter}
-            className={risk === "high" ? "bg-red-600 hover:bg-red-700" : ""}
+            className={risk === "high" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-500/30 shadow-md border-transparent" : "border-primary-200 text-primary-800"}
           >
             {risk === "high" ? "High Risk ✓" : "Top High-Risk"}
           </Button>
@@ -142,7 +142,7 @@ function CustomerList() {
         <div className="flex flex-col lg:flex-row gap-4">
           {/* Search */}
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-400" />
             <input
               type="text"
               placeholder="Cari nama, telepon, email..."
@@ -154,7 +154,7 @@ function CustomerList() {
 
           {/* Risk Filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-gray-400" />
+            <Filter className="h-5 w-5 text-primary-400" />
             <select
               value={risk}
               onChange={(e) => handleFilterChange("risk", e.target.value)}
@@ -173,7 +173,7 @@ function CustomerList() {
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${
               sort === "risk_score"
                 ? "bg-red-50 text-red-700 border border-red-200"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                : "bg-primary-100 text-stone-600 hover:bg-primary-200"
             }`}
           >
             <ArrowUpDown className="h-4 w-4" />
@@ -181,22 +181,22 @@ function CustomerList() {
           </button>
 
           {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-primary-100 rounded-lg p-1">
             <button
               onClick={() => setViewMode("table")}
               className={`p-2 rounded ${
-                viewMode === "table" ? "bg-white shadow" : "hover:bg-gray-200"
+                viewMode === "table" ? "bg-white shadow" : "hover:bg-primary-200"
               }`}
             >
-              <List className="h-5 w-5 text-gray-600" />
+              <List className="h-5 w-5 text-stone-600" />
             </button>
             <button
               onClick={() => setViewMode("grid")}
               className={`p-2 rounded ${
-                viewMode === "grid" ? "bg-white shadow" : "hover:bg-gray-200"
+                viewMode === "grid" ? "bg-white shadow" : "hover:bg-primary-200"
               }`}
             >
-              <Grid className="h-5 w-5 text-gray-600" />
+              <Grid className="h-5 w-5 text-stone-600" />
             </button>
           </div>
         </div>
@@ -257,7 +257,7 @@ function CustomerList() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-stone-500">
             Menampilkan {(page - 1) * limit + 1}-{Math.min(page * limit, total)}{" "}
             dari {total} customer
           </p>

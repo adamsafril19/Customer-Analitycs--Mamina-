@@ -14,14 +14,14 @@ function CustomerCard({ customer }) {
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-            <span className="text-blue-600 font-semibold">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-100 to-primary-200 flex items-center justify-center border border-primary-50">
+            <span className="text-primary-700 font-bold">
               {getInitials(customer.name)}
             </span>
           </div>
           <div>
-            <h3 className="font-semibold text-gray-900">{customer.name}</h3>
-            <div className="flex items-center gap-2 text-sm text-gray-500">
+            <h3 className="font-semibold text-primary-900">{customer.name}</h3>
+            <div className="flex items-center gap-2 text-sm text-stone-500">
               <Phone className="h-3 w-3" />
               <span>{maskPhone(customer.phone_display || customer.phone)}</span>
             </div>
@@ -31,7 +31,7 @@ function CustomerCard({ customer }) {
       </div>
 
       <div className="mb-3">
-        <div className="flex items-center justify-between text-sm text-gray-500 mb-1">
+        <div className="flex items-center justify-between text-sm text-stone-500 mb-1">
           <span>Risk Score</span>
           <span className="font-medium">
             {(customer.risk_score * 100).toFixed(0)}%
@@ -41,18 +41,18 @@ function CustomerCard({ customer }) {
       </div>
 
       <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-1 text-gray-500">
+        <div className="flex items-center gap-1 text-stone-500">
           <MapPin className="h-3 w-3" />
           <span>{customer.city || "-"}</span>
         </div>
-        <span className="text-gray-500">
+        <span className="text-stone-500">
           Kunjungan: {formatRelativeTime(customer.last_visit)}
         </span>
       </div>
 
       <div className="mt-3 pt-3 border-t flex justify-end">
         <button
-          className="flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
+          className="flex items-center gap-1 text-primary-600 hover:text-primary-700 text-sm font-medium"
           onClick={(e) => {
             e.stopPropagation();
             navigate(`/customers/${customer.customer_id}`);

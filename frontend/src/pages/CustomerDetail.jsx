@@ -15,6 +15,9 @@ import {
   TrendingUp,
   Activity,
   BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Hash,
 } from "lucide-react";
 import {
   LineChart,
@@ -44,7 +47,7 @@ import {
   getRiskColors,
   FEATURE_LABELS,
   EXPLAINABILITY_MAP,
-  ACTION_SUGGESTIONS,
+  getDynamicActionSuggestions,
   getSentimentEmoji,
   getSentimentColor,
 } from "../lib/utils";
@@ -55,6 +58,7 @@ function CustomerDetail() {
   const [activeTab, setActiveTab] = useState("transactions");
   const [showCreateAction, setShowCreateAction] = useState(false);
   const [showActionHistory, setShowActionHistory] = useState(false);
+  const [showAllFeatures, setShowAllFeatures] = useState(false);
 
   const { data, isLoading, error } = useCustomer360(id);
   const { data: timeline, isLoading: timelineLoading } = useCustomerTimeline(
@@ -69,7 +73,7 @@ function CustomerDetail() {
       <div className="space-y-6">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+          className="flex items-center gap-2 text-stone-600 hover:text-primary-900"
         >
           <ArrowLeft className="h-5 w-5" />
           <span>Kembali</span>
@@ -116,7 +120,7 @@ function CustomerDetail() {
 
   const riskLevel = getRiskLevel(latest_prediction?.risk_score || 0);
   const riskColors = getRiskColors(riskLevel);
-  const suggestions = ACTION_SUGGESTIONS[riskLevel] || [];
+  const suggestions = getDynamicActionSuggestions(latest_prediction?.top_reasons);
 
   // Process top reasons
   const topReasons = (latest_prediction?.top_reasons || [])
@@ -170,7 +174,7 @@ function CustomerDetail() {
       {/* Back button */}
       <button
         onClick={() => navigate(-1)}
-        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition"
+        className="flex items-center gap-2 text-stone-600 hover:text-primary-900 transition"
       >
         <ArrowLeft className="h-5 w-5" />
         <span>Kembali</span>
@@ -181,15 +185,15 @@ function CustomerDetail() {
         <div className="flex flex-col lg:flex-row lg:items-start gap-6">
           {/* Left: Profile Info */}
           <div className="flex-1">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
-                <span className="text-blue-600 font-bold text-xl">
+            <div className="flex flex-col md:flex-row md:items-center gap-6">
+              <div className="h-20 w-20 bg-gradient-to-br from-primary-100 to-primary-200 rounded-full flex items-center justify-center shrink-0 border-4 border-white shadow-sm">
+                <span className="text-primary-700 font-bold text-2xl">
                   {getInitials(customer.name)}
                 </span>
               </div>
               <div>
                 <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold text-gray-900">
+                  <h1 className="text-2xl font-bold text-primary-900">
                     {customer.name}
                   </h1>
                   <RiskLevelBadge
@@ -197,26 +201,26 @@ function CustomerDetail() {
                     size="lg"
                   />
                 </div>
-                <div className="flex items-center gap-4 text-gray-500 mt-1 flex-wrap">
+                <div className="flex items-center gap-4 text-stone-500 mt-1 flex-wrap">
                   {customer.phone_display && (
-                    <span className="flex items-center gap-1 text-sm">
+                    <span className="flex items-center gap-1 text-sm font-medium">
                       <Phone className="h-4 w-4" />
                       {maskPhone(customer.phone_display)}
                     </span>
                   )}
                   {customer.email && (
-                    <span className="flex items-center gap-1 text-sm">
+                    <span className="flex items-center gap-1 text-sm font-medium">
                       <Mail className="h-4 w-4" />
                       {customer.email}
                     </span>
                   )}
                   {customer.city && (
-                    <span className="flex items-center gap-1 text-sm">
+                    <span className="flex items-center gap-1 text-sm font-medium">
                       <MapPin className="h-4 w-4" />
                       {customer.city}
                     </span>
                   )}
-                  <span className="flex items-center gap-1 text-sm">
+                  <span className="flex items-center gap-1 text-sm font-medium">
                     <Calendar className="h-4 w-4" />
                     Member sejak {formatDate(customer.created_at)}
                   </span>
@@ -225,29 +229,29 @@ function CustomerDetail() {
             </div>
 
             {/* Quick Stats Row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <DollarSign className="h-5 w-5 text-green-600 mx-auto mb-1" />
-                <p className="text-lg font-semibold text-gray-900">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
+                <DollarSign className="h-5 w-5 text-emerald-500 mx-auto mb-1.5" />
+                <p className="text-lg font-bold text-primary-800">
                   {formatCurrency(stats.total_spent || 0)}
                 </p>
-                <p className="text-sm text-gray-500">Total Spent</p>
+                <p className="text-xs font-medium text-stone-500">Total Spent</p>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <Clock className="h-5 w-5 text-blue-600 mx-auto mb-1" />
-                <p className="text-lg font-semibold text-gray-900">
+              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
+                <Clock className="h-5 w-5 text-primary-500 mx-auto mb-1.5" />
+                <p className="text-lg font-bold text-primary-800">
                   {formatRelativeTime(stats.last_visit)}
                 </p>
-                <p className="text-sm text-gray-500">Kunjungan Terakhir</p>
+                <p className="text-xs font-medium text-stone-500">Kunjungan Terakhir</p>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <MessageSquare className="h-5 w-5 text-purple-600 mx-auto mb-1" />
-                <p className="text-lg font-semibold text-gray-900">
+              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
+                <MessageSquare className="h-5 w-5 text-purple-500 mx-auto mb-1.5" />
+                <p className="text-lg font-bold text-primary-800">
                   {stats.message_count || 0}
                 </p>
-                <p className="text-sm text-gray-500">Pesan (30 hari)</p>
+                <p className="text-sm text-stone-500">Pesan (30 hari)</p>
               </div>
-              <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <div className="text-center p-3 bg-primary-50 rounded-lg">
                 <span className="text-xl block mb-1">
                   {getSentimentEmoji(stats.avg_sentiment_30 || 0)}
                 </span>
@@ -258,14 +262,14 @@ function CustomerDetail() {
                 >
                   {((stats.avg_sentiment_30 || 0) * 100).toFixed(0)}%
                 </p>
-                <p className="text-sm text-gray-500">Sentimen (30 hari)</p>
+                <p className="text-sm text-stone-500">Sentimen (30 hari)</p>
               </div>
             </div>
           </div>
 
           {/* Right: Risk Score Display */}
           <div className={`p-4 rounded-lg ${riskColors.bg} w-full lg:w-64`}>
-            <p className="text-sm font-medium text-gray-600 mb-2">
+            <p className="text-sm font-medium text-stone-600 mb-2">
               Risk Score
             </p>
             <div className="mb-2">
@@ -274,10 +278,10 @@ function CustomerDetail() {
                 size="lg"
               />
             </div>
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-stone-500 mt-2">
               Model: {latest_prediction?.model_version || "-"}
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-stone-500">
               Prediksi: {formatDate(latest_prediction?.as_of_date)}
             </p>
           </div>
@@ -287,7 +291,7 @@ function CustomerDetail() {
       {/* SECTION B: Why At Risk? */}
       {topReasons.length > 0 && (
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          <h2 className="text-lg font-semibold text-primary-900 mb-4">
             Mengapa Berisiko?
           </h2>
           <div className="space-y-3">
@@ -299,13 +303,13 @@ function CustomerDetail() {
                     ? "bg-red-50 border-red-500"
                     : reason.impactLevel === "medium"
                     ? "bg-yellow-50 border-yellow-500"
-                    : "bg-gray-50 border-gray-300"
+                    : "bg-primary-50 border-primary-300"
                 }`}
               >
                 <span className="text-2xl">{reason.icon}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <h4 className="font-medium text-gray-900">
+                    <h4 className="font-medium text-primary-900">
                       {reason.title}
                     </h4>
                     <Badge
@@ -324,7 +328,7 @@ function CustomerDetail() {
                         : "Impact Rendah"}
                     </Badge>
                   </div>
-                  <p className="text-sm text-gray-600 mt-1">{reason.detail}</p>
+                  <p className="text-sm text-stone-600 mt-1">{reason.detail}</p>
                 </div>
               </div>
             ))}
@@ -337,13 +341,14 @@ function CustomerDetail() {
         {/* Profil Risiko (numeric_features) */}
         {numeric_features && Object.keys(numeric_features).length > 0 && (
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <BarChart3 className="h-5 w-5 text-blue-600" />
+            <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary-600" />
               Profil Risiko
             </h2>
             <div className="space-y-3">
               {Object.entries(numeric_features)
                 .filter(([key]) => key !== "as_of_date")
+                .slice(0, showAllFeatures ? undefined : 4)
                 .map(([key, value]) => {
                   const label = FEATURE_LABELS[key] || key.replace(/_/g, " ");
                   const isMonetary = ["spend_90d", "avg_tx_value"].includes(key);
@@ -356,22 +361,39 @@ function CustomerDetail() {
                   return (
                     <div
                       key={key}
-                      className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                      className="flex items-center justify-between py-2 border-b border-primary-100 last:border-0"
                     >
-                      <span className="text-sm text-gray-600">{label}</span>
-                      <span className="text-sm font-semibold text-gray-900">
+                      <span className="text-sm text-stone-600">{label}</span>
+                      <span className="text-sm font-semibold text-primary-900">
                         {displayValue}
                       </span>
                     </div>
                   );
                 })}
             </div>
+            
+            {Object.keys(numeric_features).length > 5 && (
+              <button
+                onClick={() => setShowAllFeatures(!showAllFeatures)}
+                className="mt-4 flex items-center justify-center gap-2 w-full py-2 text-sm text-primary-600 hover:bg-primary-50 rounded-lg transition"
+              >
+                {showAllFeatures ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" /> Sembunyikan detail fitur
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" /> Lihat semua fitur teknis
+                  </>
+                )}
+              </button>
+            )}
           </div>
         )}
 
         {/* Sinyal Perilaku (text_signals + text_semantics) */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
             <Activity className="h-5 w-5 text-purple-600" />
             Sinyal Perilaku
           </h2>
@@ -379,18 +401,18 @@ function CustomerDetail() {
             {/* Text Signals */}
             {text_signals && Object.keys(text_signals).length > 0 && (
               <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Komunikasi</h3>
+                <h3 className="text-sm font-medium text-stone-500 mb-2">Komunikasi</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {text_signals.msg_count_7d != null && (
-                    <div className="p-3 bg-blue-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-blue-800">{text_signals.msg_count_7d}</p>
-                      <p className="text-xs text-blue-600">Pesan 7 Hari</p>
+                    <div className="p-3 bg-primary-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-primary-800">{text_signals.msg_count_7d}</p>
+                      <p className="text-xs text-primary-600">Pesan 7 Hari</p>
                     </div>
                   )}
                   {text_signals.msg_count_30d != null && (
-                    <div className="p-3 bg-blue-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-blue-800">{text_signals.msg_count_30d}</p>
-                      <p className="text-xs text-blue-600">Pesan 30 Hari</p>
+                    <div className="p-3 bg-primary-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-primary-800">{text_signals.msg_count_30d}</p>
+                      <p className="text-xs text-primary-600">Pesan 30 Hari</p>
                     </div>
                   )}
                   {text_signals.complaint_rate_30d != null && (
@@ -410,43 +432,72 @@ function CustomerDetail() {
                     </div>
                   )}
                   {text_signals.response_delay_mean != null && (
-                    <div className="p-3 bg-gray-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-gray-800">
+                    <div className="p-3 bg-primary-50 rounded-lg text-center">
+                      <p className="text-lg font-semibold text-primary-800">
                         {(text_signals.response_delay_mean / 3600).toFixed(1)}h
                       </p>
-                      <p className="text-xs text-gray-600">Avg Respon</p>
+                      <p className="text-xs text-stone-600">Avg Respon</p>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Sentiment Distribution */}
-            {text_semantics?.sentiment_dist && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Distribusi Sentimen</h3>
-                <div className="flex gap-2">
-                  {Object.entries(text_semantics.sentiment_dist).map(([label, count]) => {
-                    const colors = {
-                      positive: "bg-green-100 text-green-800",
-                      neutral: "bg-gray-100 text-gray-800",
-                      negative: "bg-red-100 text-red-800",
-                    };
-                    return (
-                      <div key={label} className={`flex-1 p-2 rounded-lg text-center ${colors[label] || "bg-gray-100 text-gray-800"}`}>
-                        <p className="text-lg font-semibold">{count}</p>
-                        <p className="text-xs capitalize">{label}</p>
+            {/* Sentiment & Topics (BERTopic Integration) */}
+            {text_semantics && (
+              <div className="space-y-4">
+                {/* Dominant Topic */}
+                {text_semantics.dominant_topic && (
+                  <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2 text-purple-800 font-medium">
+                        <Hash className="h-4 w-4" />
+                        Topik Dominan: {text_semantics.dominant_topic}
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                    <p className="text-[10px] text-purple-600 mb-2 italic">
+                      *Topik di-generate oleh BERTopic untuk eksplorasi keluhan, tidak memengaruhi skor risiko secara langsung.
+                    </p>
+                    {text_semantics.top_keywords && text_semantics.top_keywords.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {text_semantics.top_keywords.map((kw, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-purple-600 text-xs rounded-full border border-purple-200">
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Sentiment Distribution */}
+                {text_semantics.sentiment_dist && (
+                  <div>
+                    <h3 className="text-sm font-medium text-stone-500 mb-2">Distribusi Sentimen</h3>
+                    <div className="flex gap-2">
+                      {Object.entries(text_semantics.sentiment_dist).map(([label, count]) => {
+                        const colors = {
+                          positive: "bg-green-100 text-green-800",
+                          neutral: "bg-primary-100 text-primary-800",
+                          negative: "bg-red-100 text-red-800",
+                        };
+                        return (
+                          <div key={label} className={`flex-1 p-2 rounded-lg text-center ${colors[label] || "bg-primary-100 text-primary-800"}`}>
+                            <p className="text-lg font-semibold">{count}</p>
+                            <p className="text-xs capitalize">{label}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Last Messages */}
             {last_messages && last_messages.length > 0 && (
               <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Pesan Terakhir</h3>
+                <h3 className="text-sm font-medium text-stone-500 mb-2">Pesan Terakhir</h3>
                 <div className="space-y-2">
                   {last_messages.slice(0, 3).map((msg, idx) => (
                     <div key={idx} className={`p-2 rounded text-sm border-l-3 ${
@@ -454,7 +505,7 @@ function CustomerDetail() {
                         ? "border-l-red-400 bg-red-50"
                         : msg.sentiment_label === "positive"
                         ? "border-l-green-400 bg-green-50"
-                        : "border-l-gray-300 bg-gray-50"
+                        : "border-l-gray-300 bg-primary-50"
                     }`}>
                       <div className="flex items-center gap-2 mb-1">
                         {msg.sentiment_label && (
@@ -467,7 +518,7 @@ function CustomerDetail() {
                         )}
                         {msg.has_complaint && <Badge color="red" className="text-xs">Komplain</Badge>}
                       </div>
-                      <p className="text-gray-700 text-xs">{msg.text_snippet}</p>
+                      <p className="text-primary-800 text-xs">{msg.text_snippet}</p>
                     </div>
                   ))}
                 </div>
@@ -478,7 +529,7 @@ function CustomerDetail() {
             {(!text_signals || Object.keys(text_signals).length === 0) &&
              (!text_semantics || Object.keys(text_semantics).length === 0) &&
              (!last_messages || last_messages.length === 0) && (
-              <p className="text-sm text-gray-400 text-center py-4">
+              <p className="text-sm text-primary-400 text-center py-4">
                 Belum ada data sinyal perilaku
               </p>
             )}
@@ -489,7 +540,7 @@ function CustomerDetail() {
       {/* SECTION B3: Risk Score History (NEW — Phase 4) */}
       {riskHistoryData.length > 1 && (
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
             <TrendingDown className="h-5 w-5 text-red-500" />
             Histori Risk Score
           </h2>
@@ -531,7 +582,7 @@ function CustomerDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* SECTION C: Interaction Timeline */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          <h2 className="text-lg font-semibold text-primary-900 mb-4">
             Riwayat Interaksi
           </h2>
 
@@ -542,7 +593,7 @@ function CustomerDetail() {
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 activeTab === "transactions"
                   ? "bg-blue-100 text-blue-700"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  : "bg-primary-100 text-stone-600 hover:bg-primary-200"
               }`}
             >
               Transaksi
@@ -552,7 +603,7 @@ function CustomerDetail() {
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 activeTab === "messages"
                   ? "bg-blue-100 text-blue-700"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  : "bg-primary-100 text-stone-600 hover:bg-primary-200"
               }`}
             >
               WhatsApp
@@ -562,7 +613,7 @@ function CustomerDetail() {
           {/* Timeline Content */}
           <div className="space-y-3 max-h-[400px] overflow-y-auto">
             {timelineLoading ? (
-              <div className="text-center py-8 text-gray-500">Memuat...</div>
+              <div className="text-center py-8 text-stone-500">Memuat...</div>
             ) : timeline?.items?.length > 0 || timeline?.data?.length > 0 ? (
               (timeline.items || timeline.data).map((item, idx) => (
                 <TimelineItem
@@ -572,7 +623,7 @@ function CustomerDetail() {
                 />
               ))
             ) : (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-stone-500">
                 Tidak ada data{" "}
                 {activeTab === "transactions" ? "transaksi" : "pesan"}
               </div>
@@ -582,7 +633,7 @@ function CustomerDetail() {
 
         {/* SECTION D: Suggested Actions */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          <h2 className="text-lg font-semibold text-primary-900 mb-4">
             Rekomendasi Tindakan
           </h2>
 
@@ -590,7 +641,7 @@ function CustomerDetail() {
             {suggestions.map((suggestion, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                className="flex items-center gap-3 p-3 bg-primary-50 rounded-lg hover:bg-primary-100 transition cursor-pointer"
                 onClick={() => {
                   if (suggestion.type !== "none") {
                     setShowCreateAction(true);
@@ -598,11 +649,11 @@ function CustomerDetail() {
                 }}
               >
                 <span className="text-2xl">{suggestion.icon}</span>
-                <span className="flex-1 font-medium text-gray-700">
+                <span className="flex-1 font-medium text-primary-800">
                   {suggestion.text}
                 </span>
                 {suggestion.type !== "none" && (
-                  <Plus className="h-5 w-5 text-gray-400" />
+                  <Plus className="h-5 w-5 text-primary-400" />
                 )}
               </div>
             ))}
@@ -648,18 +699,18 @@ function CustomerDetail() {
 function TimelineItem({ item, type }) {
   if (type === "transactions") {
     return (
-      <div className="flex items-start gap-3 p-3 border-l-4 border-blue-500 bg-blue-50 rounded-r-lg">
+      <div className="flex items-start gap-3 p-3 border-l-4 border-primary-500 bg-primary-50 rounded-r-lg">
         <span className="text-xl">📅</span>
         <div className="flex-1">
           <div className="flex justify-between items-start">
-            <span className="font-medium text-gray-900">
+            <span className="font-medium text-primary-900">
               {item.data?.service_type || item.description || "Transaksi"}
             </span>
             <span className="text-green-600 font-semibold">
               {formatCurrency(item.amount || 0)}
             </span>
           </div>
-          <span className="text-sm text-gray-500">{formatDate(item.date)}</span>
+          <span className="text-sm text-stone-500">{formatDate(item.date)}</span>
         </div>
       </div>
     );
@@ -672,7 +723,7 @@ function TimelineItem({ item, type }) {
   return (
     <div
       className={`flex items-start gap-3 p-3 border-l-4 rounded-r-lg ${
-        isNegative ? "border-red-500 bg-red-50" : "border-gray-300 bg-gray-50"
+        isNegative ? "border-red-500 bg-red-50" : "border-primary-300 bg-primary-50"
       }`}
     >
       <span className="text-xl">💬</span>
@@ -684,8 +735,8 @@ function TimelineItem({ item, type }) {
           )}
           {item.sentiment === "neutral" && <Badge color="gray">Netral</Badge>}
         </div>
-        <p className="text-sm text-gray-700 line-clamp-2">{item.description}</p>
-        <span className="text-xs text-gray-500 mt-1 block">
+        <p className="text-sm text-primary-800 line-clamp-2">{item.description}</p>
+        <span className="text-xs text-stone-500 mt-1 block">
           {formatDate(item.date, "d MMM yyyy, HH:mm")}
         </span>
       </div>

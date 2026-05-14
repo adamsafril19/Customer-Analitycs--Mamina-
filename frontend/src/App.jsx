@@ -12,6 +12,7 @@ const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const ChurnRisk = lazy(() => import("./pages/ChurnRisk"));
 const Actions = lazy(() => import("./pages/Actions"));
 const Settings = lazy(() => import("./pages/Settings"));
+const DataImport = lazy(() => import("./pages/DataImport"));
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
           <Route path="risk" element={<ChurnRisk />} />
           <Route path="actions" element={<Actions />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="import" element={<DataImport />} />
         </Route>
 
         {/* Catch all - redirect to dashboard */}

@@ -15,7 +15,7 @@ function Table({ children, className, ...props }) {
 
 function TableHeader({ children, className, ...props }) {
   return (
-    <thead className={cn("bg-gray-50", className)} {...props}>
+    <thead className={cn("bg-primary-50", className)} {...props}>
       {children}
     </thead>
   );
@@ -35,7 +35,7 @@ function TableBody({ children, className, ...props }) {
 function TableRow({ children, className, onClick, ...props }) {
   return (
     <tr
-      className={cn(onClick && "cursor-pointer hover:bg-gray-50", className)}
+      className={cn(onClick && "cursor-pointer hover:bg-primary-50", className)}
       onClick={onClick}
       {...props}
     >
@@ -48,7 +48,7 @@ function TableHead({ children, className, ...props }) {
   return (
     <th
       className={cn(
-        "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider",
+        "px-6 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider",
         className
       )}
       {...props}

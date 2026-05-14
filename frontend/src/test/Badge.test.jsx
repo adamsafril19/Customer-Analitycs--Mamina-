@@ -28,7 +28,7 @@ describe("Badge", () => {
 
   it("applies default gray color when no color provided", () => {
     const { container } = render(<Badge>Default</Badge>);
-    expect(container.querySelector(".bg-gray-100")).toBeInTheDocument();
-    expect(container.querySelector(".text-gray-800")).toBeInTheDocument();
+    expect(container.querySelector(".bg-primary-100")).toBeInTheDocument();
+    expect(container.querySelector(".text-primary-800")).toBeInTheDocument();
   });
 });

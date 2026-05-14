@@ -14,7 +14,7 @@ function ChurnScoreBadge({ score, showLabel = true, size = "md" }) {
   return (
     <div className="flex items-center gap-2">
       <div
-        className={cn("w-full bg-gray-200 rounded-full flex-1", sizes[size])}
+        className={cn("w-full bg-primary-200 rounded-full flex-1", sizes[size])}
       >
         <div
           className={cn(

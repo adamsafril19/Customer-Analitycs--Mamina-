@@ -46,18 +46,18 @@ function Modal({ isOpen, onClose, title, description, children, size = "md" }) {
               >
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <Dialog.Title className="text-lg font-semibold leading-6 text-gray-900">
+                    <Dialog.Title className="text-lg font-semibold leading-6 text-primary-900">
                       {title}
                     </Dialog.Title>
                     {description && (
-                      <Dialog.Description className="mt-1 text-sm text-gray-500">
+                      <Dialog.Description className="mt-1 text-sm text-stone-500">
                         {description}
                       </Dialog.Description>
                     )}
                   </div>
                   <button
                     onClick={onClose}
-                    className="text-gray-400 hover:text-gray-600 transition"
+                    className="text-primary-400 hover:text-stone-600 transition"
                   >
                     <X className="h-5 w-5" />
                   </button>
