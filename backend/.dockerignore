@@ -3,11 +3,14 @@ __pycache__
 *.pyo
 *.pyd
 .Python
+.cache/
+.venv/
 env/
 venv/
 .env
 *.log
 logs/
+models/
 .coverage
 htmlcov/
 .pytest_cache/
@@ -23,3 +26,5 @@ Dockerfile
 .dockerignore
 tests/
 *.md
+*.csv
+notebooks/

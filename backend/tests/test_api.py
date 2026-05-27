@@ -3,6 +3,11 @@ API Endpoint Tests
 """
 import pytest
 import json
+from datetime import date, datetime
+
+from app.models.customer import Customer
+from app.models.text_semantics import CustomerTextSemantics
+from app.models.topic import Topic
 
 
 class TestHealthEndpoint:
@@ -216,6 +221,76 @@ class TestActionEndpoints:
         data = response.get_json()
         assert "total" in data
         assert "actions" in data
+
+
+class TestTopicEndpoints:
+    """Tests for topic endpoints"""
+
+    def _seed_topic_versions(self, db_session):
+        CustomerTextSemantics.query.delete()
+        Topic.query.delete()
+
+        customer = Customer(name="Topic Customer", consent_given=True)
+        old_topic = Topic(
+            topic_idx=1,
+            model_version="bertopic_old",
+            name="Old Topic",
+            top_keywords=["lama"],
+            created_at=datetime(2026, 1, 1),
+        )
+        latest_topic = Topic(
+            topic_idx=1,
+            model_version="bertopic_latest",
+            name="Latest Topic",
+            top_keywords=["baru"],
+            created_at=datetime(2026, 1, 2),
+        )
+        db_session.add_all([customer, old_topic, latest_topic])
+        db_session.flush()
+        db_session.add_all([
+            CustomerTextSemantics(
+                customer_id=customer.customer_id,
+                as_of_date=date(2026, 1, 1),
+                topic_model_version="bertopic_old",
+                top_topic_counts={"1": 5},
+            ),
+            CustomerTextSemantics(
+                customer_id=customer.customer_id,
+                as_of_date=date(2026, 1, 2),
+                topic_model_version="bertopic_latest",
+                top_topic_counts={"1": 2},
+            ),
+        ])
+        db_session.commit()
+
+    def test_list_topics_defaults_to_latest_model_version(self, client, auth_headers, db_session):
+        """Topic list should not mix topic rows from old model versions."""
+        self._seed_topic_versions(db_session)
+
+        response = client.get("/api/topics", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["model_version"] == "bertopic_latest"
+        assert data["total"] == 1
+        assert data["topics"][0]["name"] == "Latest Topic"
+        assert data["topics"][0]["message_count"] == 2
+
+    def test_list_topics_can_select_model_version(self, client, auth_headers, db_session):
+        """Explicit model_version should return that version only."""
+        self._seed_topic_versions(db_session)
+
+        response = client.get(
+            "/api/topics?model_version=bertopic_old",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["model_version"] == "bertopic_old"
+        assert data["total"] == 1
+        assert data["topics"][0]["name"] == "Old Topic"
+        assert data["topics"][0]["message_count"] == 5
 
 
 class TestAuthorizationRequired:

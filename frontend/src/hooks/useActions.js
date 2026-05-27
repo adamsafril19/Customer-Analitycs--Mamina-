@@ -40,6 +40,7 @@ export function useCreateAction() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actions"] });
       queryClient.invalidateQueries({ queryKey: ["customerActions"] });
+      queryClient.invalidateQueries({ queryKey: ["predictions"] });
       toast.success("Action berhasil dibuat!");
     },
     onError: (error) => {
@@ -57,6 +58,7 @@ export function useUpdateAction() {
       queryClient.invalidateQueries({ queryKey: ["actions"] });
       queryClient.invalidateQueries({ queryKey: ["action", id] });
       queryClient.invalidateQueries({ queryKey: ["customerActions"] });
+      queryClient.invalidateQueries({ queryKey: ["predictions"] });
       toast.success("Action berhasil diupdate!");
     },
     onError: (error) => {
@@ -73,6 +75,7 @@ export function useDeleteAction() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actions"] });
       queryClient.invalidateQueries({ queryKey: ["customerActions"] });
+      queryClient.invalidateQueries({ queryKey: ["predictions"] });
       toast.success("Action berhasil dihapus!");
     },
     onError: (error) => {

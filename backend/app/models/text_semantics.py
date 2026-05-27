@@ -6,7 +6,7 @@ Used by DASHBOARD ONLY for explanation and drilldown.
 
 ML model does NOT see this table - prevents data leakage.
 
-Updated: Added avg_sentiment_score, avg_topic_confidence
+Updated: Added avg_sentiment_score, avg_topic_similarity
 """
 import uuid
 from datetime import datetime, date
@@ -27,7 +27,7 @@ class CustomerTextSemantics(db.Model):
     - sentiment_label -> sentiment_dist (distribusi)
     - sentiment_score -> avg_sentiment_score (rata-rata)
     - topic_id -> top_topic_counts (distribusi)
-    - topic_confidence -> avg_topic_confidence (rata-rata)
+    - topic_confidence -> avg_topic_similarity (rata-rata)
     - complaint_type -> top_complaint_types (distribusi)
     - keywords -> top_keywords (agregat)
     """

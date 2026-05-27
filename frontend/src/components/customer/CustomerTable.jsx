@@ -56,7 +56,10 @@ function CustomerTable({ customers }) {
               </div>
             </Table.Cell>
             <Table.Cell>
-              <RiskLevelBadge score={customer.risk_score} />
+              <RiskLevelBadge
+                score={customer.risk_score}
+                level={customer.risk_label}
+              />
             </Table.Cell>
             <Table.Cell className="text-right">
               <button

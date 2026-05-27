@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,7 +14,16 @@ const actionSchema = z.object({
   notes: z.string().optional(),
 });
 
-function CreateActionModal({ isOpen, onClose, customerId, customerName }) {
+function CreateActionModal({
+  isOpen,
+  onClose,
+  customerId,
+  customerName,
+  predictionId,
+  defaultActionType = "call",
+  defaultPriority = "high",
+  defaultNotes = "",
+}) {
   const createAction = useCreateAction();
 
   const {
@@ -24,17 +34,29 @@ function CreateActionModal({ isOpen, onClose, customerId, customerName }) {
   } = useForm({
     resolver: zodResolver(actionSchema),
     defaultValues: {
-      action_type: "call",
-      priority: "high",
+      action_type: defaultActionType,
+      priority: defaultPriority,
       due_date: new Date().toISOString().split("T")[0],
-      notes: "",
+      notes: defaultNotes,
     },
   });
+
+  useEffect(() => {
+    if (isOpen) {
+      reset({
+        action_type: defaultActionType,
+        priority: defaultPriority,
+        due_date: new Date().toISOString().split("T")[0],
+        notes: defaultNotes,
+      });
+    }
+  }, [defaultActionType, defaultNotes, defaultPriority, isOpen, reset]);
 
   const onSubmit = async (data) => {
     try {
       await createAction.mutateAsync({
         customer_id: customerId,
+        pred_id: predictionId,
         ...data,
       });
       reset();

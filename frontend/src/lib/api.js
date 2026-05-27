@@ -1,7 +1,7 @@
 import axios from "axios";
 import toast from "react-hot-toast";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -40,7 +40,7 @@ api.interceptors.response.use(
     } else if (error.response?.status === 404) {
       toast.error("Data tidak ditemukan");
     } else if (error.response?.status >= 500) {
-      toast.error("Terjadi kesalahan pada server");
+      toast.error(message);
     }
 
     return Promise.reject(error);
@@ -61,6 +61,7 @@ export const dashboardAPI = {
   getStats: () => api.get("/dashboard/stats"),
   getTrend: (days = 30) => api.get(`/dashboard/trend?days=${days}`),
   getTopDrivers: () => api.get("/dashboard/top-drivers"),
+  getBehavioralInsights: () => api.get("/dashboard/behavioral-insights"),
 };
 
 // Customers API
@@ -117,4 +118,23 @@ export const importAPI = {
   importTransactions: (file) => _uploadCSV("/import/transactions", file),
   previewMessages: (file) => _uploadCSV("/import/messages/preview", file),
   importMessages: (file) => _uploadCSV("/import/messages", file),
+};
+
+// ML Pipeline API
+export const pipelineAPI = {
+  getStatus: () => api.get("/pipeline/status"),
+  trainTopicModel: (data = {}) => api.post("/pipeline/train-topic-model", data),
+  processNLP: () => api.post("/pipeline/process-nlp"),
+  generateFeatures: () => api.post("/pipeline/generate-features"),
+  runScoring: () => api.post("/pipeline/run-scoring"),
+  retrainModel: (data = {}) => api.post("/pipeline/retrain-model", data),
+  getTask: (taskId) => api.get(`/admin/tasks/${taskId}`),
+};
+
+// Model Evaluation API
+export const modelAPI = {
+  getEvaluation: () => api.get("/model/evaluation"),
+  getFeatureImportance: () => api.get("/model/feature-importance"),
+  getThresholdSensitivity: () => api.get("/model/threshold-sensitivity"),
+  getRiskDistribution: () => api.get("/model/risk-distribution"),
 };

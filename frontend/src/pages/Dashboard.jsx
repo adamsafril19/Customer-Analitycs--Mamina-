@@ -9,11 +9,13 @@ import {
   Baby,
   Cloud,
   Flower2,
+  MessageSquare,
 } from "lucide-react";
 import {
   useDashboardStats,
   useDashboardTrend,
   useTopDrivers,
+  useBehavioralInsights,
 } from "../hooks/useDashboard";
 import { useCustomers } from "../hooks/useCustomers";
 import KPICard from "../components/dashboard/KPICard";
@@ -23,6 +25,34 @@ import RecentHighRiskTable from "../components/dashboard/RecentHighRiskTable";
 import { CardSkeleton, ChartSkeleton } from "../components/common/Skeleton";
 import Button from "../components/common/Button";
 
+const ICON_MAP = {
+  TrendingUp: TrendingUp,
+  Users: Users,
+  AlertTriangle: AlertTriangle,
+  Heart: Heart,
+  Baby: Baby,
+  MessageSquare: MessageSquare,
+};
+
+const COLOR_MAP = {
+  pink: {
+    card: "from-pink-50/50 to-white border-pink-100/50",
+    icon: "bg-pink-100/80 text-pink-600",
+  },
+  purple: {
+    card: "from-purple-50/50 to-white border-purple-100/50",
+    icon: "bg-purple-100/80 text-purple-600",
+  },
+  rose: {
+    card: "from-rose-50/50 to-white border-rose-100/50",
+    icon: "bg-rose-100/80 text-rose-600",
+  },
+  blue: {
+    card: "from-blue-50/50 to-white border-blue-100/50",
+    icon: "bg-blue-100/80 text-blue-600",
+  },
+};
+
 function Dashboard() {
   const {
     data: stats,
@@ -31,9 +61,12 @@ function Dashboard() {
   } = useDashboardStats();
   const { data: trend, isLoading: trendLoading } = useDashboardTrend(30);
   const { data: drivers, isLoading: driversLoading } = useTopDrivers();
+  const { data: insightsData, isLoading: insightsLoading } = useBehavioralInsights();
   const { data: highRiskCustomers, isLoading: customersLoading } = useCustomers(
     {
       risk_level: "high",
+      sort: "risk_score",
+      order: "desc",
       limit: 5,
     }
   );
@@ -41,6 +74,8 @@ function Dashboard() {
   const handleRefresh = () => {
     refetchStats();
   };
+
+  const insights = insightsData?.insights || [];
 
   return (
     <div className="relative space-y-6">
@@ -97,26 +132,71 @@ function Dashboard() {
                 subtext="Total customers aktif"
               />
               <KPICard
-                title="Customers At Risk"
+                title="Activity Decline Risk"
                 value={stats?.at_risk_count?.toLocaleString() || "0"}
                 icon={<AlertTriangle className="h-6 w-6 text-rose-400" />}
-                subtext="Butuh perhatian"
+                subtext="Butuh perhatian prioritas"
                 className="border-l-4 border-rose-300"
               />
               <KPICard
                 title="Rata-rata Risk Score"
                 value={`${((stats?.avg_risk_score || 0) * 100).toFixed(1)}%`}
                 icon={<TrendingUp className="h-6 w-6 text-purple-500" />}
-                subtext="Risiko penurunan aktivitas"
+                subtext="Tingkat disengagement rata-rata"
               />
               <KPICard
-                title="Prediksi Baru (7 Hari)"
+                title="Estimasi Risiko Baru"
                 value={stats?.new_predictions_7d?.toLocaleString() || "0"}
                 icon={<Baby className="h-6 w-6 text-blue-400" />}
-                subtext="Penilaian terbaru"
+                subtext="Penilaian 7 hari terakhir"
               />
             </>
           )}
+        </div>
+
+        {/* Behavioral Insights Summary — Dynamic from ML data */}
+        <div className="mb-6">
+          <h2 className="text-xl font-bold text-primary-900 mb-3 flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-pink-500" />
+            Behavioral Insights Summary
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {insightsLoading ? (
+              <>
+                <CardSkeleton />
+                <CardSkeleton />
+                <CardSkeleton />
+                <CardSkeleton />
+              </>
+            ) : insights.length > 0 ? (
+              insights.map((insight) => {
+                const IconComponent = ICON_MAP[insight.icon] || TrendingUp;
+                const colors = COLOR_MAP[insight.color] || COLOR_MAP.pink;
+                return (
+                  <div
+                    key={insight.key}
+                    className={`bg-gradient-to-br ${colors.card} backdrop-blur-sm p-4 rounded-2xl border shadow-sm flex items-start gap-3`}
+                  >
+                    <div className={`p-2 ${colors.icon} rounded-xl mt-0.5`}>
+                      <IconComponent className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-stone-700">
+                        {insight.title}
+                      </h4>
+                      <p className="text-xs text-stone-500 mt-1 leading-relaxed">
+                        {insight.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="col-span-full text-center py-8 text-stone-400 text-sm">
+                Belum ada data insight. Jalankan ML Pipeline terlebih dahulu.
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Charts Row */}

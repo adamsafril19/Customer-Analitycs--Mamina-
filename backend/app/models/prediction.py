@@ -92,9 +92,9 @@ class ChurnPrediction(db.Model):
     @staticmethod
     def score_to_label(score: float) -> str:
         """Convert churn score to label"""
-        if score < 0.3:
+        if score < 0.40:
             return "low"
-        elif score < 0.7:
+        elif score < 0.90:
             return "medium"
         else:
             return "high"

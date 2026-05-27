@@ -9,11 +9,8 @@ Provides:
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from flasgger import swag_from
-from sqlalchemy import func
-
-from app import db
 from app.models.topic import Topic
-from app.models.feedback import FeedbackFeatures
+from app.models.text_semantics import CustomerTextSemantics
 from app.models.prediction import ChurnPrediction
 from app.utils.errors import NotFoundError
 from app.utils.validators import validate_uuid
@@ -52,23 +49,16 @@ topics_bp = Blueprint("topics", __name__)
     }
 })
 def list_topics():
-    """List all topics with message counts"""
-    topics = Topic.query.all()
+    """List topics with message counts for one topic model version."""
+    model_version = _resolve_topic_model_version()
+    topics = _topic_query_for_version(model_version).all()
     
-    # Get message counts per topic
-    topic_counts = dict(
-        db.session.query(
-            FeedbackFeatures.topic_id,
-            func.count(FeedbackFeatures.feature_id)
-        ).filter(
-            FeedbackFeatures.topic_id.isnot(None)
-        ).group_by(FeedbackFeatures.topic_id).all()
-    )
+    topic_counts = _semantic_topic_counts(model_version)
     
     result = []
     for topic in topics:
         topic_data = topic.to_dict()
-        topic_data["message_count"] = topic_counts.get(topic.topic_id, 0)
+        topic_data["message_count"] = topic_counts.get(str(topic.topic_idx), 0)
         result.append(topic_data)
     
     # Sort by message count descending
@@ -76,7 +66,8 @@ def list_topics():
     
     return jsonify({
         "topics": result,
-        "total": len(result)
+        "total": len(result),
+        "model_version": model_version,
     })
 
 
@@ -107,27 +98,20 @@ def get_topic(topic_id: str):
     if not topic:
         raise NotFoundError(f"Topic {topic_id} not found")
     
-    # Get sample messages
-    sample_messages = db.session.query(
-        FeedbackFeatures.feature_id,
-        FeedbackFeatures.sentiment_label
-    ).filter(
-        FeedbackFeatures.topic_id == topic_uuid
-    ).limit(10).all()
+    topic_key = str(topic.topic_idx)
+    semantic_rows = _semantic_rows_for_topic(topic_key, topic.model_version)
     
     result = topic.to_dict()
-    result["sample_message_count"] = len(sample_messages)
+    result["sample_message_count"] = sum(
+        int((row.top_topic_counts or {}).get(topic_key, 0) or 0)
+        for row in semantic_rows
+    )
     
     # Get sentiment distribution for this topic
-    sentiment_dist = dict(
-        db.session.query(
-            FeedbackFeatures.sentiment_label,
-            func.count(FeedbackFeatures.feature_id)
-        ).filter(
-            FeedbackFeatures.topic_id == topic_uuid,
-            FeedbackFeatures.sentiment_label.isnot(None)
-        ).group_by(FeedbackFeatures.sentiment_label).all()
-    )
+    sentiment_dist = {}
+    for row in semantic_rows:
+        for label, count in (row.sentiment_dist or {}).items():
+            sentiment_dist[label] = sentiment_dist.get(label, 0) + int(count or 0)
     result["sentiment_distribution"] = sentiment_dist
     
     return jsonify(result)
@@ -180,20 +164,15 @@ def get_topic_lift():
     
     baseline_churn_rate = high_risk / total_predictions if total_predictions > 0 else 0
     
-    # Get all topics
-    topics = Topic.query.all()
+    model_version = _resolve_topic_model_version()
+    topics = _topic_query_for_version(model_version).all()
     
     topic_lifts = []
     
     for topic in topics:
-        # Get customers who have messages with this topic
-        customer_ids_with_topic = db.session.query(
-            FeedbackFeatures.customer_id.distinct()
-        ).filter(
-            FeedbackFeatures.topic_id == topic.topic_id
-        ).all()
-        
-        customer_ids = [c[0] for c in customer_ids_with_topic]
+        topic_key = str(topic.topic_idx)
+        semantic_rows = _semantic_rows_for_topic(topic_key, model_version)
+        customer_ids = [row.customer_id for row in semantic_rows]
         
         if not customer_ids:
             continue
@@ -212,10 +191,10 @@ def get_topic_lift():
         # Calculate lift
         lift = topic_churn_rate / baseline_churn_rate if baseline_churn_rate > 0 else 0
         
-        # Get message count
-        msg_count = FeedbackFeatures.query.filter(
-            FeedbackFeatures.topic_id == topic.topic_id
-        ).count()
+        msg_count = sum(
+            int((row.top_topic_counts or {}).get(topic_key, 0) or 0)
+            for row in semantic_rows
+        )
         
         topic_lifts.append({
             "topic_id": str(topic.topic_id),
@@ -233,5 +212,52 @@ def get_topic_lift():
     return jsonify({
         "topic_lifts": topic_lifts,
         "baseline_churn_rate": round(baseline_churn_rate, 3),
-        "total_topics": len(topic_lifts)
+        "total_topics": len(topic_lifts),
+        "model_version": model_version,
     })
+
+
+def _resolve_topic_model_version():
+    requested = request.args.get("model_version")
+    if requested:
+        return requested
+
+    latest = (
+        Topic.query.with_entities(Topic.model_version)
+        .order_by(Topic.created_at.desc())
+        .first()
+    )
+    return latest[0] if latest else None
+
+
+def _topic_query_for_version(model_version):
+    query = Topic.query
+    if model_version:
+        query = query.filter(Topic.model_version == model_version)
+    return query
+
+
+def _semantic_query_for_version(model_version):
+    query = CustomerTextSemantics.query.filter(
+        CustomerTextSemantics.top_topic_counts.isnot(None)
+    )
+    if model_version:
+        query = query.filter(CustomerTextSemantics.topic_model_version == model_version)
+    return query
+
+
+def _semantic_topic_counts(model_version=None):
+    counts = {}
+    rows = _semantic_query_for_version(model_version).all()
+    for row in rows:
+        for topic_idx, count in (row.top_topic_counts or {}).items():
+            counts[str(topic_idx)] = counts.get(str(topic_idx), 0) + int(count or 0)
+    return counts
+
+
+def _semantic_rows_for_topic(topic_key: str, model_version=None):
+    rows = _semantic_query_for_version(model_version).all()
+    return [
+        row for row in rows
+        if topic_key in (row.top_topic_counts or {})
+    ]

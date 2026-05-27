@@ -1,29 +1,39 @@
-version: "3.8"
+x-backend-build: &backend-build
+  context: ..
+  dockerfile: docker/Dockerfile
+  target: runtime
+
+x-backend-env: &backend-env
+  FLASK_ENV: production
+  DATABASE_URL: postgresql://mamina:mamina_password@db:5432/churn_db
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  MODEL_PATH: /app/models/churn_model.pkl
+  TOPIC_MODEL_PATH: /app/models/topic_model
+  NLP_STRICT: "true"
+  HF_HOME: /app/.cache/huggingface
+  TRANSFORMERS_CACHE: /app/.cache/huggingface/transformers
+  SENTENCE_TRANSFORMERS_HOME: /app/.cache/huggingface/sentence_transformers
 
 services:
   # Flask API
   api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    build: *backend-build
     container_name: mamina-api
     ports:
       - "5000:5000"
     environment:
-      - FLASK_ENV=production
-      - FLASK_APP=app:create_app
-      - DATABASE_URL=postgresql://mamina:mamina_password@db:5432/churn_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-jwt-secret-here}
-      - MODEL_PATH=/app/models/churn_model.pkl
-      - MODEL_VERSION=v1.0.0
-      - ENABLE_SHAP=true
+      <<: *backend-env
+      FLASK_APP: app:create_app
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-here}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-jwt-secret-here}
+      MODEL_VERSION: v1.0.0
+      ENABLE_SHAP: "true"
     volumes:
       - ../models:/app/models:ro
       - ../logs:/app/logs
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -41,21 +51,14 @@ services:
 
   # Celery Worker
   celery-worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    build: *backend-build
     container_name: mamina-celery-worker
     command: celery -A app.tasks.celery_app worker --loglevel=info
-    environment:
-      - FLASK_ENV=production
-      - DATABASE_URL=postgresql://mamina:mamina_password@db:5432/churn_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - MODEL_PATH=/app/models/churn_model.pkl
+    environment: *backend-env
     volumes:
-      - ../models:/app/models:ro
+      - ../models:/app/models
       - ../logs:/app/logs
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -67,19 +70,13 @@ services:
 
   # Celery Beat (Scheduler)
   celery-beat:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    build: *backend-build
     container_name: mamina-celery-beat
     command: celery -A app.tasks.celery_app beat --loglevel=info
-    environment:
-      - FLASK_ENV=production
-      - DATABASE_URL=postgresql://mamina:mamina_password@db:5432/churn_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    environment: *backend-env
     volumes:
       - ../logs:/app/logs
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       - celery-worker
     restart: unless-stopped
@@ -147,3 +144,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  hf_cache:

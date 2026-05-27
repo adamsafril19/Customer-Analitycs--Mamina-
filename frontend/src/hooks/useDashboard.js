@@ -39,6 +39,17 @@ export function useTopDrivers() {
   });
 }
 
+export function useBehavioralInsights() {
+  return useQuery({
+    queryKey: ["behavioralInsights"],
+    queryFn: async () => {
+      const res = await dashboardAPI.getBehavioralInsights();
+      return res.data.data || res.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function usePredictions(params = {}) {
   return useQuery({
     queryKey: ["predictions", params],

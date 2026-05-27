@@ -1,5 +1,8 @@
-# Multi-stage build for smaller final image
-FROM python:3.10-slim as builder
+# syntax=docker/dockerfile:1
+
+# Dependency stage. This is the expensive layer and should only rebuild when
+# requirements.txt changes.
+FROM python:3.10-slim AS deps
 
 WORKDIR /app
 
@@ -9,20 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY requirements.txt .
 ENV PIP_DEFAULT_TIMEOUT=120 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_RETRIES=10
-RUN pip install --no-cache-dir --user --timeout 120 --retries 10 -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --user --timeout 120 --retries 10 -r requirements.txt
 
 
-# Final stage
-FROM python:3.10-slim
+# Runtime stage. Code-only rebuilds should usually start here from cached deps.
+FROM python:3.10-slim AS runtime
 
 WORKDIR /app
 
-# Cache Hugging Face models in the image to avoid runtime downloads
+# Keep HF cache outside copied source and mount it as a volume in compose.
 ENV HF_HOME=/app/.cache/huggingface \
     TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/huggingface/sentence_transformers
@@ -34,8 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash appuser
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /home/appuser/.local
+COPY --from=deps /root/.local /home/appuser/.local
 
 # Make sure scripts in .local are usable
 ENV PATH=/home/appuser/.local/bin:$PATH
@@ -43,25 +45,12 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-
 # Create directories
-RUN mkdir -p /app/logs /app/models && chown -R appuser:appuser /app
+RUN mkdir -p /app/logs /app/models /app/.cache/huggingface \
+    && chown -R appuser:appuser /app /home/appuser/.local
 
 # Switch to non-root user
 USER appuser
-
-# Pre-download HF models used by the backend
-RUN python - <<'PY'
-from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-AutoTokenizer.from_pretrained("Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis")
-AutoModelForSequenceClassification.from_pretrained(
-    "Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis"
-)
-print("HF models cached")
-PY
 
 # Expose port
 EXPOSE 5000
@@ -72,3 +61,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Default command
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "run:app"]
+
+
+# Optional image variant with HF models baked in. Use only for deployment builds
+# where a larger image is preferable to first-run model downloads.
+FROM runtime AS runtime-preloaded
+
+RUN python -c "from sentence_transformers import SentenceTransformer; from transformers import AutoModelForSequenceClassification, AutoTokenizer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'); AutoTokenizer.from_pretrained('Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis'); AutoModelForSequenceClassification.from_pretrained('Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis'); print('HF models cached')"

@@ -117,6 +117,7 @@ dmypy.json
 # ML Models (not in git, loaded at runtime)
 models/*.pkl
 models/*.joblib
+models/topic_model
 
 # Logs
 logs/

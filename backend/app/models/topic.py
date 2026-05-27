@@ -130,7 +130,7 @@ class ShapCache(db.Model):
             # MODEL CONTRIBUTION (Mathematical feature attribution)
             "model_contribution": {
                 "type": "shap" if self.explanation_type == "shap" else "heuristic",
-                "source": "TreeExplainer on XGBoost" if self.explanation_type == "shap" else "domain_heuristic",
+                "source": "SHAP explainer on XGBoost" if self.explanation_type == "shap" else "domain_heuristic",
                 "values": self.shap_top,
                 "interpretation": "Mathematical contribution of each feature to model output"
             },

@@ -1,44 +1,118 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  ClipboardList,
-  Filter,
   Check,
-  Clock,
-  XCircle,
+  ClipboardList,
+  Eye,
+  Filter,
   Loader2,
+  PhoneCall,
+  Tag,
+  XCircle,
 } from "lucide-react";
 import { useActions, useUpdateAction } from "../hooks/useActions";
 import Table from "../components/common/Table";
 import Pagination from "../components/common/Pagination";
-import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import EmptyState from "../components/common/EmptyState";
-import Modal from "../components/common/Modal";
 import { TableRowSkeleton } from "../components/common/Skeleton";
 import {
+  ACTION_TYPE_LABELS,
   formatDate,
   formatRelativeTime,
-  ACTION_TYPE_LABELS,
-  ACTION_STATUS_LABELS,
-  PRIORITY_LABELS,
-  getStatusColors,
-  getPriorityColors,
 } from "../lib/utils";
+
+const STATUS_OPTIONS = [
+  { value: "", label: "Semua" },
+  { value: "pending", label: "Menunggu" },
+  { value: "in_progress", label: "Dikerjakan" },
+  { value: "completed", label: "Selesai" },
+  { value: "cancelled", label: "Batal" },
+];
+
+const PRIORITY_OPTIONS = [
+  { value: "", label: "Semua Prioritas" },
+  { value: "high", label: "Tinggi" },
+  { value: "medium", label: "Sedang" },
+  { value: "low", label: "Rendah" },
+];
+
+const STATUS_BADGE = {
+  pending: { color: "yellow", label: "Menunggu" },
+  in_progress: { color: "blue", label: "Dikerjakan" },
+  completed: { color: "green", label: "Selesai" },
+  cancelled: { color: "gray", label: "Dibatalkan" },
+};
+
+const PRIORITY_BADGE = {
+  high: { color: "red", label: "Tinggi" },
+  medium: { color: "yellow", label: "Sedang" },
+  low: { color: "gray", label: "Rendah" },
+};
+
+function getDueState(dueDate) {
+  if (!dueDate) return { label: "Tanpa deadline", color: "gray" };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate);
+  due.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((due - today) / 86400000);
+
+  if (diffDays < 0) return { label: "Terlambat", color: "red" };
+  if (diffDays === 0) return { label: "Hari ini", color: "orange" };
+  if (diffDays <= 2) return { label: `${diffDays} hari lagi`, color: "yellow" };
+  return { label: formatRelativeTime(dueDate), color: "gray" };
+}
+
+function ActionButtons({ action, onStatusUpdate, isPending }) {
+  const disabled = isPending;
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {action.status === "pending" && (
+        <button
+          onClick={() => onStatusUpdate(action.action_id, "in_progress")}
+          disabled={disabled}
+          className="p-2 text-primary-600 hover:text-primary-800 hover:bg-primary-50 rounded-lg transition-colors disabled:opacity-50"
+          title="Mulai kerjakan"
+        >
+          <Loader2 className="h-5 w-5" />
+        </button>
+      )}
+      {action.status === "in_progress" && (
+        <button
+          onClick={() => onStatusUpdate(action.action_id, "completed")}
+          disabled={disabled}
+          className="p-2 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
+          title="Tandai selesai"
+        >
+          <Check className="h-5 w-5" />
+        </button>
+      )}
+      {action.status !== "completed" && action.status !== "cancelled" && (
+        <button
+          onClick={() => onStatusUpdate(action.action_id, "cancelled")}
+          disabled={disabled}
+          className="p-2 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+          title="Batalkan"
+        >
+          <XCircle className="h-5 w-5" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 function Actions() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedAction, setSelectedAction] = useState(null);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
-  // Get params from URL
   const status = searchParams.get("status") || "";
   const priority = searchParams.get("priority") || "";
   const page = parseInt(searchParams.get("page") || "1", 10);
   const limit = 20;
 
-  // Fetch actions
   const { data, isLoading, error } = useActions({
     status: status || undefined,
     priority: priority || undefined,
@@ -49,11 +123,19 @@ function Actions() {
   const actions = data?.actions || [];
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / limit);
-
-  // Update action mutation
   const updateAction = useUpdateAction();
 
-  // Handle filter change
+  const stats = {
+    open: actions.filter((a) => ["pending", "in_progress"].includes(a.status)).length,
+    pending: actions.filter((a) => a.status === "pending").length,
+    in_progress: actions.filter((a) => a.status === "in_progress").length,
+    overdue: actions.filter(
+      (a) =>
+        !["completed", "cancelled"].includes(a.status) &&
+        getDueState(a.due_date).label === "Terlambat"
+    ).length,
+  };
+
   const handleFilterChange = useCallback(
     (key, value) => {
       const newParams = new URLSearchParams(searchParams);
@@ -68,7 +150,6 @@ function Actions() {
     [searchParams, setSearchParams]
   );
 
-  // Handle page change
   const handlePageChange = useCallback(
     (newPage) => {
       const newParams = new URLSearchParams(searchParams);
@@ -78,109 +159,89 @@ function Actions() {
     [searchParams, setSearchParams]
   );
 
-  // Handle status update
   const handleStatusUpdate = async (actionId, newStatus) => {
-    try {
-      await updateAction.mutateAsync({
-        id: actionId,
-        data: { status: newStatus },
-      });
-    } catch (error) {
-      // Error handled by mutation
-    }
+    await updateAction.mutateAsync({
+      id: actionId,
+      data: { status: newStatus },
+    });
   };
 
-  // Stats calculation
-  const stats = {
-    pending: actions.filter((a) => a.status === "pending").length,
-    in_progress: actions.filter((a) => a.status === "in_progress").length,
-    completed: actions.filter((a) => a.status === "completed").length,
+  const renderActionMeta = (action) => {
+    const due = getDueState(action.due_date);
+    const statusInfo = STATUS_BADGE[action.status] || STATUS_BADGE.pending;
+    const priorityInfo = PRIORITY_BADGE[action.priority] || PRIORITY_BADGE.medium;
+
+    return { due, statusInfo, priorityInfo };
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-primary-800 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-primary-900 flex items-center gap-2">
             <ClipboardList className="h-6 w-6 text-primary-600" />
             Follow-Up Actions
           </h1>
-          <p className="text-stone-500 mt-1 font-medium">Kelola tindak lanjut customer</p>
+          <p className="text-stone-500 mt-1 font-medium">
+            Queue tindak lanjut customer, dari assignment sampai selesai.
+          </p>
         </div>
-      </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <Clock className="h-8 w-8 text-amber-600" />
-            <div>
-              <p className="text-2xl font-bold text-amber-700">
-                {stats.pending}
-              </p>
-              <p className="text-sm text-amber-600 font-medium">Menunggu</p>
-            </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-lg bg-white border border-primary-100 px-4 py-3 shadow-sm">
+            <p className="text-xs text-stone-500">Open queue</p>
+            <p className="text-xl font-bold text-primary-900">{stats.open}</p>
           </div>
-        </div>
-        <div className="bg-primary-50 border border-primary-200 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <Loader2 className="h-8 w-8 text-primary-600" />
-            <div>
-              <p className="text-2xl font-bold text-primary-700">
-                {stats.in_progress}
-              </p>
-              <p className="text-sm text-primary-600 font-medium">Sedang Dikerjakan</p>
-            </div>
+          <div className="rounded-lg bg-white border border-amber-100 px-4 py-3 shadow-sm">
+            <p className="text-xs text-stone-500">Menunggu</p>
+            <p className="text-xl font-bold text-amber-600">{stats.pending}</p>
           </div>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <Check className="h-8 w-8 text-emerald-600" />
-            <div>
-              <p className="text-2xl font-bold text-emerald-700">
-                {stats.completed}
-              </p>
-              <p className="text-sm text-emerald-600 font-medium">Selesai</p>
-            </div>
+          <div className="rounded-lg bg-white border border-blue-100 px-4 py-3 shadow-sm">
+            <p className="text-xs text-stone-500">Dikerjakan</p>
+            <p className="text-xl font-bold text-blue-600">{stats.in_progress}</p>
+          </div>
+          <div className="rounded-lg bg-white border border-rose-100 px-4 py-3 shadow-sm">
+            <p className="text-xs text-stone-500">Terlambat</p>
+            <p className="text-xl font-bold text-rose-600">{stats.overdue}</p>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
       <div className="bg-white rounded-lg shadow-md p-4">
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Status Filter */}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-1 bg-primary-100 rounded-lg p-1">
+            {STATUS_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => handleFilterChange("status", option.value)}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+                  status === option.value
+                    ? "bg-white shadow text-primary-700"
+                    : "text-stone-600 hover:text-primary-900"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center gap-2">
             <Filter className="h-5 w-5 text-primary-400" />
             <select
-              value={status}
-              onChange={(e) => handleFilterChange("status", e.target.value)}
-              className="input w-auto"
+              value={priority}
+              onChange={(e) => handleFilterChange("priority", e.target.value)}
+              className="input w-full sm:w-auto"
             >
-              <option value="">Semua Status</option>
-              <option value="pending">Menunggu</option>
-              <option value="in_progress">Sedang Dikerjakan</option>
-              <option value="completed">Selesai</option>
-              <option value="cancelled">Dibatalkan</option>
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
-
-          {/* Priority Filter */}
-          <select
-            value={priority}
-            onChange={(e) => handleFilterChange("priority", e.target.value)}
-            className="input w-auto"
-          >
-            <option value="">Semua Prioritas</option>
-            <option value="high">Prioritas Tinggi</option>
-            <option value="medium">Prioritas Sedang</option>
-            <option value="low">Prioritas Rendah</option>
-          </select>
         </div>
       </div>
 
-      {/* Actions Table */}
       <div className="bg-white rounded-lg shadow-md">
         {isLoading ? (
           <table className="min-w-full">
@@ -196,104 +257,158 @@ function Actions() {
           </div>
         ) : actions.length === 0 ? (
           <EmptyState
-            icon="📋"
+            icon={<ClipboardList className="h-14 w-14 mx-auto text-primary-300" />}
             title="Belum ada action"
-            description="Buat action dari halaman customer detail"
+            description="Buat action dari customer detail atau risk prioritization."
           />
         ) : (
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>Customer</Table.Head>
-                <Table.Head>Tipe Aksi</Table.Head>
-                <Table.Head>Prioritas</Table.Head>
-                <Table.Head>Status</Table.Head>
-                <Table.Head>Deadline</Table.Head>
-                <Table.Head>Catatan</Table.Head>
-                <Table.Head className="text-right">Aksi</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {actions.map((action) => (
-                <Table.Row key={action.action_id}>
-                  <Table.Cell>
-                    <button
-                      onClick={() =>
-                        navigate(`/customers/${action.customer_id}`)
-                      }
-                      className="font-medium text-primary-600 hover:text-primary-800 hover:underline"
-                    >
-                      {action.customer_name}
-                    </button>
-                  </Table.Cell>
-                  <Table.Cell>
-                    {ACTION_TYPE_LABELS[action.action_type] ||
-                      action.action_type}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <span
-                      className={`badge ${getPriorityColors(action.priority)}`}
-                    >
-                      {PRIORITY_LABELS[action.priority] || action.priority}
-                    </span>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <span className={`badge ${getStatusColors(action.status)}`}>
-                      {ACTION_STATUS_LABELS[action.status] || action.status}
-                    </span>
-                  </Table.Cell>
-                  <Table.Cell className="text-stone-500">
-                    {formatDate(action.due_date)}
-                  </Table.Cell>
-                  <Table.Cell className="text-stone-500 max-w-xs truncate">
-                    {action.notes || "-"}
-                  </Table.Cell>
-                  <Table.Cell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {action.status === "pending" && (
-                        <button
-                          onClick={() =>
-                            handleStatusUpdate(action.action_id, "in_progress")
-                          }
-                          className="p-2 text-primary-600 hover:text-primary-800 hover:bg-primary-50 rounded-lg transition-colors"
-                          title="Mulai Kerjakan"
-                        >
-                          <Loader2 className="h-5 w-5" />
-                        </button>
-                      )}
-                      {action.status === "in_progress" && (
-                        <button
-                          onClick={() =>
-                            handleStatusUpdate(action.action_id, "completed")
-                          }
-                          className="p-1 text-green-600 hover:text-green-800"
-                          title="Selesaikan"
-                        >
-                          <Check className="h-5 w-5" />
-                        </button>
-                      )}
-                      {action.status !== "completed" &&
-                        action.status !== "cancelled" && (
+          <>
+            <div className="hidden xl:block">
+              <Table className="table-fixed">
+                <colgroup>
+                  <col className="w-[21%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[19%]" />
+                  <col className="w-[6%]" />
+                </colgroup>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head className="px-4">Customer</Table.Head>
+                    <Table.Head className="px-4">Tipe</Table.Head>
+                    <Table.Head className="px-4">Prioritas</Table.Head>
+                    <Table.Head className="px-4">Status</Table.Head>
+                    <Table.Head className="px-4">Deadline</Table.Head>
+                    <Table.Head className="px-4">Catatan</Table.Head>
+                    <Table.Head className="px-4 text-right">Aksi</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {actions.map((action) => {
+                    const { due, statusInfo, priorityInfo } = renderActionMeta(action);
+                    return (
+                      <Table.Row key={action.action_id}>
+                        <Table.Cell className="px-4 align-top whitespace-normal">
                           <button
-                            onClick={() =>
-                              handleStatusUpdate(action.action_id, "cancelled")
-                            }
-                            className="p-1 text-red-600 hover:text-red-800"
-                            title="Batalkan"
+                            onClick={() => navigate(`/customers/${action.customer_id}`)}
+                            className="font-semibold text-primary-700 hover:text-primary-900 hover:underline text-left leading-snug"
                           >
-                            <XCircle className="h-5 w-5" />
+                            {action.customer_name || "Customer"}
                           </button>
-                        )}
+                          <p className="text-xs text-stone-500 mt-1">
+                            Dibuat {formatRelativeTime(action.created_at)}
+                          </p>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top whitespace-normal">
+                          <div className="flex items-center gap-2 text-stone-700">
+                            <PhoneCall className="h-4 w-4 text-primary-500 shrink-0" />
+                            <span>
+                              {ACTION_TYPE_LABELS[action.action_type] ||
+                                action.action_type}
+                            </span>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top">
+                          <Badge color={priorityInfo.color}>{priorityInfo.label}</Badge>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top">
+                          <Badge color={statusInfo.color}>{statusInfo.label}</Badge>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top whitespace-normal">
+                          <div className="space-y-1">
+                            <Badge color={due.color}>{due.label}</Badge>
+                            <p className="text-xs text-stone-500">
+                              {formatDate(action.due_date)}
+                            </p>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top text-stone-600 whitespace-normal">
+                          <p className="line-clamp-3">{action.notes || "-"}</p>
+                          {action.assigned_to && (
+                            <p className="text-xs text-stone-500 mt-1">
+                              Assigned: {action.assigned_to}
+                            </p>
+                          )}
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-top text-right">
+                          <ActionButtons
+                            action={action}
+                            onStatusUpdate={handleStatusUpdate}
+                            isPending={updateAction.isPending}
+                          />
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
+                </Table.Body>
+              </Table>
+            </div>
+
+            <div className="xl:hidden divide-y divide-gray-200">
+              {actions.map((action) => {
+                const { due, statusInfo, priorityInfo } = renderActionMeta(action);
+                return (
+                  <div key={action.action_id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          <Badge color={statusInfo.color}>{statusInfo.label}</Badge>
+                          <Badge color={priorityInfo.color}>
+                            {priorityInfo.label}
+                          </Badge>
+                          <Badge color={due.color}>{due.label}</Badge>
+                        </div>
+                        <button
+                          onClick={() => navigate(`/customers/${action.customer_id}`)}
+                          className="font-semibold text-primary-800 text-left leading-snug"
+                        >
+                          {action.customer_name || "Customer"}
+                        </button>
+                        <p className="text-xs text-stone-500 mt-1">
+                          {ACTION_TYPE_LABELS[action.action_type] ||
+                            action.action_type}
+                          {" | "}
+                          {formatDate(action.due_date)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => navigate(`/customers/${action.customer_id}`)}
+                        className="p-2 text-blue-600 hover:text-blue-800 shrink-0"
+                        title="Lihat customer"
+                      >
+                        <Eye className="h-5 w-5" />
+                      </button>
                     </div>
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
+
+                    <div className="mt-3 rounded-lg bg-primary-50 border border-primary-100 p-3">
+                      <div className="flex items-start gap-2">
+                        <Tag className="h-4 w-4 text-primary-500 mt-0.5 shrink-0" />
+                        <p className="text-sm text-stone-700">
+                          {action.notes || "Tidak ada catatan."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <p className="text-xs text-stone-500">
+                        Dibuat {formatRelativeTime(action.created_at)}
+                      </p>
+                      <ActionButtons
+                        action={action}
+                        onStatusUpdate={handleStatusUpdate}
+                        isPending={updateAction.isPending}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-stone-500">

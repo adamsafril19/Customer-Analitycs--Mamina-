@@ -7,9 +7,11 @@ import {
   LayoutDashboard,
   Users,
   AlertTriangle,
+  BarChart3,
   ClipboardList,
   Settings,
   Upload,
+  Workflow,
   Baby,
   Sparkles,
   Heart,
@@ -20,9 +22,11 @@ import { cn } from "../../lib/utils";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Customers", href: "/customers", icon: Users },
-  { name: "Risk Analysis", href: "/risk", icon: AlertTriangle },
+  { name: "Risk Prioritization", href: "/risk", icon: AlertTriangle },
   { name: "Actions", href: "/actions", icon: ClipboardList },
   { name: "Import Data", href: "/import", icon: Upload },
+  { name: "ML Pipeline", href: "/ml-pipeline", icon: Workflow },
+  { name: "Model Evaluation", href: "/model-evaluation", icon: BarChart3 },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

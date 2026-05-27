@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Search, Filter, Plus, Grid, List, ArrowUpDown, AlertTriangle } from "lucide-react";
+import { Search, Filter, Grid, List, ArrowUpDown, AlertTriangle } from "lucide-react";
 import { useCustomers } from "../hooks/useCustomers";
 import CustomerTable from "../components/customer/CustomerTable";
 import CustomerCard from "../components/customer/CustomerCard";
@@ -32,7 +32,7 @@ function CustomerList() {
   const debouncedSearch = useDebounce(searchInput, 500);
 
   // Update URL when debounced search changes
-  useMemo(() => {
+  useEffect(() => {
     if (debouncedSearch !== search) {
       const newParams = new URLSearchParams(searchParams);
       if (debouncedSearch) {
@@ -43,7 +43,7 @@ function CustomerList() {
       newParams.set("page", "1");
       setSearchParams(newParams);
     }
-  }, [debouncedSearch]);
+  }, [debouncedSearch, search, searchParams, setSearchParams]);
 
   // Fetch customers with sort params
   const { data, isLoading, error } = useCustomers({
@@ -132,7 +132,7 @@ function CustomerList() {
             onClick={handleHighRiskFilter}
             className={risk === "high" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-500/30 shadow-md border-transparent" : "border-primary-200 text-primary-800"}
           >
-            {risk === "high" ? "High Risk ✓" : "Top High-Risk"}
+            {risk === "high" ? "High Risk Aktif" : "Top High-Risk"}
           </Button>
         </div>
       </div>
@@ -145,7 +145,7 @@ function CustomerList() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-400" />
             <input
               type="text"
-              placeholder="Cari nama, telepon, email..."
+              placeholder="Cari nama atau kota..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="input pl-10"
@@ -177,7 +177,7 @@ function CustomerList() {
             }`}
           >
             <ArrowUpDown className="h-4 w-4" />
-            {sort === "risk_score" ? "Sort: Risk ↓" : "Sort: Nama A-Z"}
+            {sort === "risk_score" ? "Sort: Risk turun" : "Sort: Nama A-Z"}
           </button>
 
           {/* View Mode Toggle */}

@@ -11,7 +11,7 @@ Arsitektur:
 import os
 import logging
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
@@ -45,7 +45,17 @@ def create_app(config_name: str = None) -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    CORS(
+        app,
+        resources={r"/api/*": {"origins": "*"}},
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
+
+    @app.before_request
+    def handle_cors_preflight():
+        if request.method == "OPTIONS" and request.path.startswith("/api/"):
+            return "", 204
     
     # Swagger configuration
     swagger_config = {
@@ -98,9 +108,15 @@ def create_app(config_name: str = None) -> Flask:
     # JWT error handlers
     register_jwt_callbacks(app)
     
-    # Load ML models on startup (singleton pattern)
-    with app.app_context():
-        load_ml_models(app)
+    # Load ML models on startup (singleton pattern). Training subprocesses can
+    # skip this because they build a fresh model and should not depend on old
+    # serialized artifacts.
+    if os.getenv("SKIP_ML_LOAD", "").lower() in {"1", "true", "yes"}:
+        app.config["MODEL_LOADED"] = False
+        app.logger.info("Skipping ML model load because SKIP_ML_LOAD is enabled")
+    else:
+        with app.app_context():
+            load_ml_models(app)
     
     app.logger.info(f"Application started in {config_name} mode")
     
@@ -122,11 +138,16 @@ def setup_logging(app: Flask) -> None:
     # File handler (if configured)
     log_file = app.config.get("LOG_FILE")
     if log_file:
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(log_level)
-        file_handler.setFormatter(console_formatter)
-        app.logger.addHandler(file_handler)
+        try:
+            log_dir = os.path.dirname(log_file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(log_level)
+            file_handler.setFormatter(console_formatter)
+            app.logger.addHandler(file_handler)
+        except OSError as e:
+            app.logger.warning(f"File logging disabled: {e}")
     
     app.logger.addHandler(console_handler)
     app.logger.setLevel(log_level)
@@ -143,6 +164,8 @@ def register_blueprints(app: Flask) -> None:
     from app.routes.dashboard import dashboard_bp
     from app.routes.topics import topics_bp
     from app.routes.import_routes import import_bp
+    from app.routes.pipeline import pipeline_bp
+    from app.routes.model import model_bp
     
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -153,6 +176,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(topics_bp, url_prefix="/api")
     app.register_blueprint(import_bp, url_prefix="/api/import")
+    app.register_blueprint(pipeline_bp, url_prefix="/api")
+    app.register_blueprint(model_bp, url_prefix="/api")
 
 
 def register_error_handlers(app: Flask) -> None:

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -12,12 +12,16 @@ import {
   Plus,
   History,
   TrendingDown,
-  TrendingUp,
   Activity,
   BarChart3,
   ChevronDown,
   ChevronUp,
   Hash,
+  Sparkles,
+  Lightbulb,
+  Smile,
+  Meh,
+  Frown,
 } from "lucide-react";
 import {
   LineChart,
@@ -48,9 +52,18 @@ import {
   FEATURE_LABELS,
   EXPLAINABILITY_MAP,
   getDynamicActionSuggestions,
-  getSentimentEmoji,
   getSentimentColor,
 } from "../lib/utils";
+
+function SentimentIcon({ value }) {
+  if (value >= 0.3) {
+    return <Smile className="h-5 w-5 text-emerald-600 mx-auto mb-1.5" />;
+  }
+  if (value >= -0.3) {
+    return <Meh className="h-5 w-5 text-yellow-600 mx-auto mb-1.5" />;
+  }
+  return <Frown className="h-5 w-5 text-red-600 mx-auto mb-1.5" />;
+}
 
 function CustomerDetail() {
   const { id } = useParams();
@@ -59,6 +72,8 @@ function CustomerDetail() {
   const [showCreateAction, setShowCreateAction] = useState(false);
   const [showActionHistory, setShowActionHistory] = useState(false);
   const [showAllFeatures, setShowAllFeatures] = useState(false);
+  const [activeChartTab, setActiveChartTab] = useState("risk");
+  const [activeSection, setActiveSection] = useState("overview");
 
   const { data, isLoading, error } = useCustomer360(id);
   const { data: timeline, isLoading: timelineLoading } = useCustomerTimeline(
@@ -67,6 +82,29 @@ function CustomerDetail() {
   );
   const { data: actions } = useCustomerActions(id);
   const { data: riskHistory } = useCustomerRiskHistory(id);
+
+  // Reconstructed activity timeline progression
+  const activityTimelineData = useMemo(() => {
+    const dailyMap = {};
+    
+    // Extract transaction items and message items from timeline
+    const items = timeline?.items || timeline?.data || [];
+    items.forEach((item) => {
+      if (!item.date) return;
+      const dateStr = item.date.slice(0, 10);
+      if (!dailyMap[dateStr]) {
+        dailyMap[dateStr] = { date: dateStr, transactions: 0, messages: 0, spend: 0 };
+      }
+      if (item.type === "transaction") {
+        dailyMap[dateStr].transactions += 1;
+        dailyMap[dateStr].spend += item.amount || 0;
+      } else if (item.type === "feedback") {
+        dailyMap[dateStr].messages += 1;
+      }
+    });
+
+    return Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+  }, [timeline]);
 
   if (isLoading) {
     return (
@@ -104,10 +142,10 @@ function CustomerDetail() {
     text_signals,
     text_semantics,
     last_messages,
+    historical_messages,
   } = data;
 
-  // Map data if quick_stats doesn't exist (backward compatibility)
-  const stats = quick_stats || {
+  const fallbackStats = {
     total_transactions: transaction_summary?.total_transactions || 0,
     total_spent: transaction_summary?.total_spent || 0,
     last_visit:
@@ -117,8 +155,22 @@ function CustomerDetail() {
     message_count: sentiment_summary?.neg_msg_count_30 || 0,
     avg_sentiment_30: sentiment_summary?.avg_sentiment_30 || 0,
   };
+  const stats = {
+    ...fallbackStats,
+    ...(quick_stats || {}),
+    last_visit:
+      quick_stats?.last_visit ||
+      fallbackStats.last_visit,
+    total_spent:
+      quick_stats?.total_spent ?? fallbackStats.total_spent,
+    total_transactions:
+      quick_stats?.total_transactions ?? fallbackStats.total_transactions,
+    message_count:
+      quick_stats?.message_count ?? fallbackStats.message_count,
+  };
 
-  const riskLevel = getRiskLevel(latest_prediction?.risk_score || 0);
+  const riskLevel =
+    latest_prediction?.risk_label || getRiskLevel(latest_prediction?.risk_score || 0);
   const riskColors = getRiskColors(riskLevel);
   const suggestions = getDynamicActionSuggestions(latest_prediction?.top_reasons);
 
@@ -156,7 +208,6 @@ function CustomerDetail() {
       }
 
       return {
-        icon: mapping.icon,
         title: mapping.title || FEATURE_LABELS[reason.feature] || reason.feature,
         detail,
         impactLevel,
@@ -165,7 +216,7 @@ function CustomerDetail() {
 
   // Risk history chart data
   const riskHistoryData = (riskHistory?.history || []).map((h) => ({
-    date: h.as_of_date,
+    date: h.as_of_date ? h.as_of_date.slice(0, 10) : "",
     risk_score: h.risk_score,
   }));
 
@@ -181,119 +232,184 @@ function CustomerDetail() {
       </button>
 
       {/* SECTION A: Customer Profile Header */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex flex-col lg:flex-row lg:items-start gap-6">
-          {/* Left: Profile Info */}
-          <div className="flex-1">
-            <div className="flex flex-col md:flex-row md:items-center gap-6">
-              <div className="h-20 w-20 bg-gradient-to-br from-primary-100 to-primary-200 rounded-full flex items-center justify-center shrink-0 border-4 border-white shadow-sm">
-                <span className="text-primary-700 font-bold text-2xl">
-                  {getInitials(customer.name)}
-                </span>
+      <div className="overflow-hidden rounded-xl bg-white shadow-md border border-primary-100">
+        <div className="h-2 bg-primary-600" />
+        <div className="p-5 lg:p-6">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_280px]">
+            <div className="min-w-0">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="h-20 w-20 rounded-2xl bg-primary-50 border border-primary-200 flex items-center justify-center shrink-0 shadow-sm">
+                  <span className="text-primary-700 font-bold text-2xl">
+                    {getInitials(customer.name)}
+                  </span>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
+                      <h1 className="text-2xl font-bold text-primary-900 leading-tight break-words">
+                        {customer.name}
+                      </h1>
+                      <p className="text-sm text-stone-500 mt-1">
+                        Customer profile dan sinyal risiko terbaru
+                      </p>
+                    </div>
+                    <RiskLevelBadge
+                      score={latest_prediction?.risk_score || 0}
+                      level={latest_prediction?.risk_label}
+                      size="lg"
+                    />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {customer.phone_display && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                        <Phone className="h-3.5 w-3.5 text-primary-500" />
+                        {maskPhone(customer.phone_display)}
+                      </span>
+                    )}
+                    {customer.email && (
+                      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                        <Mail className="h-3.5 w-3.5 text-primary-500 shrink-0" />
+                        <span className="truncate max-w-[220px]">{customer.email}</span>
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                      <MapPin className="h-3.5 w-3.5 text-primary-500" />
+                      {customer.city || "Kota belum tersedia"}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                      <Calendar className="h-3.5 w-3.5 text-primary-500" />
+                      Member sejak {formatDate(customer.created_at)}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold text-primary-900">
-                    {customer.name}
-                  </h1>
+
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <DollarSign className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-stone-500">Total Spent</p>
+                      <p className="text-base font-bold text-primary-900 truncate">
+                        {formatCurrency(stats.total_spent || 0)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <Clock className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-stone-500">Kunjungan Terakhir</p>
+                      <p className="text-base font-bold text-primary-900 truncate">
+                        {formatRelativeTime(stats.last_visit)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <MessageSquare className="h-5 w-5 text-purple-600 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-stone-500">Pesan 30 Hari</p>
+                      <p className="text-base font-bold text-primary-900">
+                        {stats.message_count || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 shrink-0">
+                      <SentimentIcon value={stats.avg_sentiment_30 || 0} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-stone-500">Sentimen 30 Hari</p>
+                      <p
+                        className={`text-base font-bold ${getSentimentColor(
+                          stats.avg_sentiment_30 || 0
+                        )}`}
+                      >
+                        {((stats.avg_sentiment_30 || 0) * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border p-5 ${riskColors.bg} ${riskColors.border}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-stone-500">
+                    Risk Score
+                  </p>
+                  <div className="mt-3">
+                    <ChurnScoreBadge
+                      score={latest_prediction?.risk_score || 0}
+                      size="lg"
+                    />
+                  </div>
+                </div>
+                <Activity className="h-5 w-5 text-primary-500" />
+              </div>
+
+              <div className="mt-5 space-y-3 rounded-lg bg-white/70 p-3 border border-white/80">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-stone-500">Level</span>
                   <RiskLevelBadge
                     score={latest_prediction?.risk_score || 0}
-                    size="lg"
+                    level={latest_prediction?.risk_label}
                   />
                 </div>
-                <div className="flex items-center gap-4 text-stone-500 mt-1 flex-wrap">
-                  {customer.phone_display && (
-                    <span className="flex items-center gap-1 text-sm font-medium">
-                      <Phone className="h-4 w-4" />
-                      {maskPhone(customer.phone_display)}
-                    </span>
-                  )}
-                  {customer.email && (
-                    <span className="flex items-center gap-1 text-sm font-medium">
-                      <Mail className="h-4 w-4" />
-                      {customer.email}
-                    </span>
-                  )}
-                  {customer.city && (
-                    <span className="flex items-center gap-1 text-sm font-medium">
-                      <MapPin className="h-4 w-4" />
-                      {customer.city}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-1 text-sm font-medium">
-                    <Calendar className="h-4 w-4" />
-                    Member sejak {formatDate(customer.created_at)}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-stone-500">Model</span>
+                  <span className="text-xs font-semibold text-stone-700 truncate max-w-[130px]">
+                    {latest_prediction?.model_version || "-"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-stone-500">Prediksi</span>
+                  <span className="text-xs font-semibold text-stone-700">
+                    {formatDate(latest_prediction?.as_of_date)}
                   </span>
                 </div>
               </div>
             </div>
-
-            {/* Quick Stats Row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
-                <DollarSign className="h-5 w-5 text-emerald-500 mx-auto mb-1.5" />
-                <p className="text-lg font-bold text-primary-800">
-                  {formatCurrency(stats.total_spent || 0)}
-                </p>
-                <p className="text-xs font-medium text-stone-500">Total Spent</p>
-              </div>
-              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
-                <Clock className="h-5 w-5 text-primary-500 mx-auto mb-1.5" />
-                <p className="text-lg font-bold text-primary-800">
-                  {formatRelativeTime(stats.last_visit)}
-                </p>
-                <p className="text-xs font-medium text-stone-500">Kunjungan Terakhir</p>
-              </div>
-              <div className="text-center p-4 bg-primary-50 rounded-xl border border-primary-100">
-                <MessageSquare className="h-5 w-5 text-purple-500 mx-auto mb-1.5" />
-                <p className="text-lg font-bold text-primary-800">
-                  {stats.message_count || 0}
-                </p>
-                <p className="text-sm text-stone-500">Pesan (30 hari)</p>
-              </div>
-              <div className="text-center p-3 bg-primary-50 rounded-lg">
-                <span className="text-xl block mb-1">
-                  {getSentimentEmoji(stats.avg_sentiment_30 || 0)}
-                </span>
-                <p
-                  className={`text-lg font-semibold ${getSentimentColor(
-                    stats.avg_sentiment_30 || 0
-                  )}`}
-                >
-                  {((stats.avg_sentiment_30 || 0) * 100).toFixed(0)}%
-                </p>
-                <p className="text-sm text-stone-500">Sentimen (30 hari)</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Risk Score Display */}
-          <div className={`p-4 rounded-lg ${riskColors.bg} w-full lg:w-64`}>
-            <p className="text-sm font-medium text-stone-600 mb-2">
-              Risk Score
-            </p>
-            <div className="mb-2">
-              <ChurnScoreBadge
-                score={latest_prediction?.risk_score || 0}
-                size="lg"
-              />
-            </div>
-            <p className="text-xs text-stone-500 mt-2">
-              Model: {latest_prediction?.model_version || "-"}
-            </p>
-            <p className="text-xs text-stone-500">
-              Prediksi: {formatDate(latest_prediction?.as_of_date)}
-            </p>
           </div>
         </div>
       </div>
 
+      <div className="bg-white rounded-lg shadow-sm border border-primary-100 p-1 flex flex-wrap gap-1">
+        {[
+          { key: "overview", label: "Overview & Action" },
+          { key: "signals", label: "Sinyal Risiko" },
+          { key: "history", label: "Riwayat & Grafik" },
+        ].map((section) => (
+          <button
+            key={section.key}
+            onClick={() => setActiveSection(section.key)}
+            className={`px-4 py-2 rounded-md text-sm font-semibold transition ${
+              activeSection === section.key
+                ? "bg-primary-600 text-white shadow-sm"
+                : "text-stone-600 hover:bg-primary-50 hover:text-primary-900"
+            }`}
+          >
+            {section.label}
+          </button>
+        ))}
+      </div>
+
       {/* SECTION B: Why At Risk? */}
-      {topReasons.length > 0 && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-primary-900 mb-4">
-            Mengapa Berisiko?
-          </h2>
+      {activeSection === "overview" && (
+      <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.85fr] gap-6">
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <h2 className="text-lg font-semibold text-primary-900 mb-4">
+          Mengapa Berisiko?
+        </h2>
+        {topReasons.length > 0 ? (
           <div className="space-y-3">
             {topReasons.map((reason, idx) => (
               <div
@@ -306,7 +422,7 @@ function CustomerDetail() {
                     : "bg-primary-50 border-primary-300"
                 }`}
               >
-                <span className="text-2xl">{reason.icon}</span>
+                <BarChart3 className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <h4 className="font-medium text-primary-900">
@@ -333,11 +449,74 @@ function CustomerDetail() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+            <p className="text-sm font-medium text-primary-900">
+              SHAP explanation belum tersedia
+            </p>
+            <p className="mt-1 text-sm text-stone-600">
+              Risk score tetap tersedia, tetapi alasan utama belum dihitung dari kontribusi model XGBoost.
+              Jalankan retrain sampai artifact SHAP tersedia lalu jalankan Run Risk Scoring.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* SECTION B2: Profil Risiko & Sinyal Perilaku (NEW — Phase 4) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <h2 className="text-lg font-semibold text-primary-900 mb-1">
+          Saran Operasional
+        </h2>
+        <p className="text-xs text-stone-500 mb-4">
+          Saran berbasis indikator risiko dominan. Gunakan sebagai panduan follow-up, bukan keputusan otomatis.
+        </p>
+
+        <div className="space-y-3 mb-6">
+          {suggestions.map((suggestion, idx) => (
+            <div
+              key={idx}
+              className="flex items-start gap-3 p-3 bg-primary-50 rounded-lg hover:bg-primary-100 transition cursor-pointer"
+              onClick={() => {
+                if (suggestion.type !== "none") {
+                  setShowCreateAction(true);
+                }
+              }}
+            >
+              <Lightbulb className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
+              <span className="flex-1 text-sm font-medium text-primary-800">
+                {suggestion.text}
+              </span>
+              {suggestion.type !== "none" && (
+                <Plus className="h-5 w-5 text-primary-400 shrink-0" />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Button
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => setShowCreateAction(true)}
+            className="flex-1"
+          >
+            Buat Action
+          </Button>
+          <Button
+            variant="outline"
+            icon={<History className="h-4 w-4" />}
+            onClick={() => setShowActionHistory(true)}
+            className="flex-1"
+          >
+            Riwayat ({actions?.total || 0})
+          </Button>
+        </div>
+      </div>
+      </div>
+      )}
+
+      {activeSection === "signals" && (
+      <>
+      <div className="grid grid-cols-1 gap-6">
         {/* Profil Risiko (numeric_features) */}
         {numeric_features && Object.keys(numeric_features).length > 0 && (
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -391,193 +570,408 @@ function CustomerDetail() {
           </div>
         )}
 
-        {/* Sinyal Perilaku (text_signals + text_semantics) */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
-            <Activity className="h-5 w-5 text-purple-600" />
-            Sinyal Perilaku
-          </h2>
-          <div className="space-y-4">
-            {/* Text Signals */}
-            {text_signals && Object.keys(text_signals).length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-stone-500 mb-2">Komunikasi</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  {text_signals.msg_count_7d != null && (
-                    <div className="p-3 bg-primary-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-primary-800">{text_signals.msg_count_7d}</p>
-                      <p className="text-xs text-primary-600">Pesan 7 Hari</p>
-                    </div>
-                  )}
-                  {text_signals.msg_count_30d != null && (
-                    <div className="p-3 bg-primary-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-primary-800">{text_signals.msg_count_30d}</p>
-                      <p className="text-xs text-primary-600">Pesan 30 Hari</p>
-                    </div>
-                  )}
-                  {text_signals.complaint_rate_30d != null && (
-                    <div className={`p-3 rounded-lg text-center ${
-                      text_signals.complaint_rate_30d > 0.3 ? "bg-red-50" : "bg-green-50"
-                    }`}>
-                      <p className={`text-lg font-semibold ${
-                        text_signals.complaint_rate_30d > 0.3 ? "text-red-800" : "text-green-800"
-                      }`}>
-                        {(text_signals.complaint_rate_30d * 100).toFixed(0)}%
-                      </p>
-                      <p className={`text-xs ${
-                        text_signals.complaint_rate_30d > 0.3 ? "text-red-600" : "text-green-600"
-                      }`}>
-                        Rasio Komplain
-                      </p>
-                    </div>
-                  )}
-                  {text_signals.response_delay_mean != null && (
-                    <div className="p-3 bg-primary-50 rounded-lg text-center">
-                      <p className="text-lg font-semibold text-primary-800">
-                        {(text_signals.response_delay_mean / 3600).toFixed(1)}h
-                      </p>
-                      <p className="text-xs text-stone-600">Avg Respon</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+      </div>
 
-            {/* Sentiment & Topics (BERTopic Integration) */}
-            {text_semantics && (
-              <div className="space-y-4">
-                {/* Dominant Topic */}
-                {text_semantics.dominant_topic && (
-                  <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2 text-purple-800 font-medium">
-                        <Hash className="h-4 w-4" />
-                        Topik Dominan: {text_semantics.dominant_topic}
-                      </div>
-                    </div>
-                    <p className="text-[10px] text-purple-600 mb-2 italic">
-                      *Topik di-generate oleh BERTopic untuk eksplorasi keluhan, tidak memengaruhi skor risiko secara langsung.
-                    </p>
-                    {text_semantics.top_keywords && text_semantics.top_keywords.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {text_semantics.top_keywords.map((kw, i) => (
-                          <span key={i} className="px-2 py-0.5 bg-white text-purple-600 text-xs rounded-full border border-purple-200">
-                            {kw}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {/* Sentiment Distribution */}
-                {text_semantics.sentiment_dist && (
-                  <div>
-                    <h3 className="text-sm font-medium text-stone-500 mb-2">Distribusi Sentimen</h3>
-                    <div className="flex gap-2">
-                      {Object.entries(text_semantics.sentiment_dist).map(([label, count]) => {
-                        const colors = {
-                          positive: "bg-green-100 text-green-800",
-                          neutral: "bg-primary-100 text-primary-800",
-                          negative: "bg-red-100 text-red-800",
-                        };
-                        return (
-                          <div key={label} className={`flex-1 p-2 rounded-lg text-center ${colors[label] || "bg-primary-100 text-primary-800"}`}>
-                            <p className="text-lg font-semibold">{count}</p>
-                            <p className="text-xs capitalize">{label}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+      {/* SECTION B3: Sinyal Perilaku & Percakapan (NLP) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        {/* Panel 1: Predictive Interaction Signals */}
+        <div className="bg-white rounded-2xl shadow-md border border-pink-100 p-6 transition-all hover:shadow-lg">
+          <h2 className="text-lg font-bold bg-gradient-to-r from-pink-500 to-purple-500 bg-clip-text text-transparent mb-2 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-pink-400" />
+            Predictive Interaction Signals
+          </h2>
+          <p className="text-[11px] text-stone-500 mb-4 italic">
+            *Sinyal prediktif dihitung dari chat dalam window 30 hari sebelum tanggal prediksi.
+          </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                <p className="text-[10px] uppercase tracking-wide text-stone-400 font-bold">
+                  Window Prediksi
+                </p>
+                <p className="text-sm font-semibold text-stone-700 mt-1">
+                  30 hari sebelum {latest_prediction?.as_of_date || numeric_features?.as_of_date || "-"}
+                </p>
               </div>
-            )}
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                <p className="text-[10px] uppercase tracking-wide text-stone-400 font-bold">
+                  Chat Dalam Window
+                </p>
+                <p className="text-sm font-semibold text-stone-700 mt-1">
+                  {text_signals?.msg_count_30d || 0} pesan
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-gradient-to-br from-pink-50/50 to-white rounded-2xl border border-pink-100/50 text-center shadow-inner">
+                <p className="text-xs text-stone-500 font-medium mb-1">Rata-rata Sentimen</p>
+                <p className={`text-xl font-extrabold ${
+                  (numeric_features?.avg_sentiment_score ?? 0) < 0.2 ? "text-rose-500" : "text-emerald-600"
+                }`}>
+                  {numeric_features?.avg_sentiment_score != null
+                    ? `${(numeric_features.avg_sentiment_score * 100).toFixed(0)}%`
+                    : "-"}
+                </p>
+                <p className="text-[10px] text-stone-400 mt-1.5 leading-relaxed">
+                  Tingkat kepuasan chat (Skala -100% s/d +100%)
+                </p>
+              </div>
+
+              <div className="p-4 bg-gradient-to-br from-purple-50/50 to-white rounded-2xl border border-purple-100/50 text-center shadow-inner">
+                <p className="text-xs text-stone-500 font-medium mb-1">Tren Sentimen</p>
+                <p className={`text-xl font-extrabold ${
+                  (numeric_features?.sentiment_trend ?? 0) < 0 ? "text-rose-500" : "text-emerald-600"
+                }`}>
+                  {numeric_features?.sentiment_trend != null
+                    ? numeric_features.sentiment_trend.toFixed(3)
+                    : "-"}
+                </p>
+                <p className="text-[10px] text-stone-400 mt-1.5 leading-relaxed">
+                  Arah pergeseran kepuasan komunikasi (Slope)
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gradient-to-br from-blue-50/50 to-white rounded-2xl border border-blue-100/50 shadow-inner flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-stone-700">Tren Pesan Masuk</h4>
+                <p className="text-[10px] text-stone-500 mt-0.5">Smoothing intensitas chat WhatsApp</p>
+              </div>
+              <div className="text-right">
+                <p className={`text-xl font-extrabold ${
+                  (numeric_features?.msg_trend_smoothed ?? 0) < 0 ? "text-rose-500" : "text-emerald-600"
+                }`}>
+                  {numeric_features?.msg_trend_smoothed != null
+                    ? numeric_features.msg_trend_smoothed.toFixed(3)
+                    : "-"}
+                </p>
+                <span className="text-[10px] text-stone-400">Slope Volatilitas</span>
+              </div>
+            </div>
+            
+            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/50">
+              <span className="text-xs font-bold text-stone-600 flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
+                Interpretasi Sinyal Prediktif
+              </span>
+              <p className="text-xs text-stone-500 mt-1 leading-relaxed">
+                {(text_signals?.msg_count_30d || 0) === 0
+                  ? "Tidak ada chat pada window prediksi 30 hari, sehingga sinyal percakapan untuk model bernilai 0."
+                  : (numeric_features?.avg_sentiment_score ?? 0) < 0.2
+                  ? "Komunikasi pada window prediksi menunjukkan sinyal sentimen/keluhan yang perlu diperhatikan."
+                  : "Intensitas dan tingkat kepuasan komunikasi pada window prediksi relatif stabil."}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Panel 2: Conversation Insights (Exploratory) */}
+        <div className="bg-white rounded-2xl shadow-md border border-purple-100 p-6 transition-all hover:shadow-lg">
+          <h2 className="text-lg font-bold bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent mb-2 flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-purple-400" />
+            Conversation Insights (Exploratory)
+          </h2>
+          <p className="text-[11px] text-stone-500 mb-4 italic">
+            *Bagian atas memakai snapshot NLP pada window prediksi. Conversation historis di bawah hanya konteks, bukan input skor saat ini.
+          </p>
+          <div className="space-y-4">
+            {/* Dominant Topic */}
+            <div className="p-3 bg-purple-50 rounded-xl border border-purple-100 shadow-sm">
+              <div className="flex items-center gap-2 text-purple-800 text-sm font-semibold mb-1">
+                <Hash className="h-4 w-4 text-purple-500" />
+                Topik Dominan: {text_semantics?.dominant_topic || "Belum tersedia"}
+              </div>
+              {Array.isArray(text_semantics?.top_keywords) && text_semantics.top_keywords.length > 0 ? (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {text_semantics.top_keywords.map((kw, i) => (
+                    <span key={i} className="px-2 py-0.5 bg-white text-purple-600 text-xs rounded-full border border-purple-200 shadow-sm font-medium">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-purple-500 mt-2">
+                  Keyword eksploratif belum tersedia untuk customer ini.
+                </p>
+              )}
+            </div>
+
+            {/* Sentiment Distribution */}
+            <div>
+              <h3 className="text-xs font-semibold text-stone-600 mb-2">Distribusi Tipe Chat</h3>
+              <div className="flex gap-2">
+                {["positive", "neutral", "negative"].map((label) => {
+                  const count = text_semantics?.sentiment_dist?.[label] || 0;
+                  const colors = {
+                    positive: "bg-emerald-50 text-emerald-800 border-emerald-100",
+                    neutral: "bg-primary-50 text-primary-800 border-primary-100",
+                    negative: "bg-rose-50 text-rose-800 border-rose-100",
+                  };
+                  return (
+                    <div key={label} className={`flex-1 p-2 rounded-xl text-center border ${colors[label]}`}>
+                      <p className="text-lg font-bold">{count}</p>
+                      <p className="text-[10px] capitalize font-medium">{label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* Last Messages */}
-            {last_messages && last_messages.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-stone-500 mb-2">Pesan Terakhir</h3>
+            <div>
+              <h3 className="text-xs font-semibold text-stone-600 mb-2">Cuplikan Chat Dalam Window Prediksi</h3>
+              {last_messages && last_messages.length > 0 ? (
                 <div className="space-y-2">
                   {last_messages.slice(0, 3).map((msg, idx) => (
-                    <div key={idx} className={`p-2 rounded text-sm border-l-3 ${
+                    <div key={idx} className={`p-3 rounded-xl text-xs border-l-4 shadow-sm ${
                       msg.sentiment_label === "negative"
-                        ? "border-l-red-400 bg-red-50"
+                        ? "border-l-rose-400 bg-rose-50/50"
                         : msg.sentiment_label === "positive"
-                        ? "border-l-green-400 bg-green-50"
-                        : "border-l-gray-300 bg-primary-50"
+                        ? "border-l-emerald-400 bg-emerald-50/50"
+                        : "border-l-stone-300 bg-stone-50"
                     }`}>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1.5">
                         {msg.sentiment_label && (
                           <Badge color={
                             msg.sentiment_label === "negative" ? "red" :
                             msg.sentiment_label === "positive" ? "green" : "gray"
-                          } className="text-xs">
+                          } className="text-[9px] uppercase font-bold px-1.5 py-0.5">
                             {msg.sentiment_label}
                           </Badge>
                         )}
-                        {msg.has_complaint && <Badge color="red" className="text-xs">Komplain</Badge>}
+                        {msg.has_complaint && <Badge color="red" className="text-[9px] uppercase font-bold px-1.5 py-0.5">Komplain</Badge>}
                       </div>
-                      <p className="text-primary-800 text-xs">{msg.text_snippet}</p>
+                      <p className="text-stone-700 italic font-medium leading-relaxed">
+                        {msg.text_snippet}
+                      </p>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="p-3 rounded-xl text-xs border border-stone-200 bg-stone-50 text-stone-500">
+                  Tidak ada chat dalam window prediksi 30 hari.
+                </div>
+              )}
+            </div>
 
-            {/* Empty state */}
-            {(!text_signals || Object.keys(text_signals).length === 0) &&
-             (!text_semantics || Object.keys(text_semantics).length === 0) &&
-             (!last_messages || last_messages.length === 0) && (
-              <p className="text-sm text-primary-400 text-center py-4">
-                Belum ada data sinyal perilaku
-              </p>
-            )}
+            <div>
+              <h3 className="text-xs font-semibold text-stone-600 mb-2">Conversation Historis Terakhir</h3>
+              {historical_messages && historical_messages.length > 0 ? (
+                <div className="space-y-2">
+                  {historical_messages.slice(0, 3).map((msg, idx) => (
+                    <div key={idx} className="p-3 rounded-xl text-xs border-l-4 border-l-purple-300 bg-purple-50/40 shadow-sm">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <Badge color={msg.direction === "inbound" ? "purple" : "gray"} className="text-[9px] uppercase font-bold px-1.5 py-0.5">
+                          {msg.direction || "chat"}
+                        </Badge>
+                        <span className="text-[10px] text-stone-400">
+                          {formatRelativeTime(msg.timestamp)}
+                        </span>
+                      </div>
+                      <p className="text-stone-700 italic font-medium leading-relaxed">
+                        {msg.text_snippet}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl text-xs border border-stone-200 bg-stone-50 text-stone-500">
+                  Belum ada conversation historis yang terhubung.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION B3: Risk Score History (NEW — Phase 4) */}
-      {riskHistoryData.length > 1 && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
-            <TrendingDown className="h-5 w-5 text-red-500" />
-            Histori Risk Score
-          </h2>
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={riskHistoryData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#e5e7eb" }}
-                />
-                <YAxis
-                  domain={[0, 1]}
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#e5e7eb" }}
-                  tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-                />
-                <Tooltip
-                  formatter={(v) => [`${(v * 100).toFixed(1)}%`, "Risk Score"]}
-                  labelFormatter={(l) => `Tanggal: ${l}`}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="risk_score"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  dot={{ r: 4, fill: "#ef4444" }}
-                  activeDot={{ r: 6, strokeWidth: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+      </>
+      )}
+
+      {/* SECTION B3: Behavioral Dynamics & Risk History */}
+      {activeSection === "history" && (
+      <>
+      <div className="bg-white rounded-2xl shadow-md border border-primary-100 p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-lg font-bold text-primary-900 flex items-center gap-2">
+              <TrendingDown className="h-5 w-5 text-primary-600" />
+              Behavioral Dynamics & Risk History
+            </h2>
+            <p className="text-xs text-stone-500 mt-0.5">Visualisasi pergeseran perilaku dan skor risiko pelanggan dari waktu ke waktu.</p>
+          </div>
+          <div className="flex gap-1.5 bg-stone-100 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveChartTab("risk")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeChartTab === "risk"
+                  ? "bg-white text-primary-900 shadow-sm"
+                  : "text-stone-600 hover:text-stone-900"
+              }`}
+            >
+              Skor Risiko
+            </button>
+            <button
+              onClick={() => setActiveChartTab("activity")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeChartTab === "activity"
+                  ? "bg-white text-primary-900 shadow-sm"
+                  : "text-stone-600 hover:text-stone-900"
+              }`}
+            >
+              Transaksi & Spend
+            </button>
+            <button
+              onClick={() => setActiveChartTab("chats")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeChartTab === "chats"
+                  ? "bg-white text-primary-900 shadow-sm"
+                  : "text-stone-600 hover:text-stone-900"
+              }`}
+            >
+              Chat WhatsApp
+            </button>
           </div>
         </div>
-      )}
+
+        <div className="h-[280px]">
+          {activeChartTab === "risk" && (
+            riskHistoryData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={riskHistoryData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f5" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                  />
+                  <YAxis
+                    domain={[0, 1]}
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                    tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #e7e5e4", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                    formatter={(v) => [`${(v * 100).toFixed(1)}%`, "Estimasi Skor Risiko"]}
+                    labelFormatter={(l) => `Tanggal: ${l}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="risk_score"
+                    stroke="#db2777"
+                    strokeWidth={3}
+                    dot={{ r: 5, fill: "#db2777", strokeWidth: 2, stroke: "#fff" }}
+                    activeDot={{ r: 7, strokeWidth: 2 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-stone-400 text-sm italic">
+                Histori skor risiko belum tersedia.
+              </div>
+            )
+          )}
+
+          {activeChartTab === "activity" && (
+            activityTimelineData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={activityTimelineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f5" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                    tickFormatter={(v) => `Rp ${v.toLocaleString("id-ID")}`}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[0, 'auto']}
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                    tickFormatter={(v) => `${v} Tx`}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #e7e5e4", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                    labelFormatter={(l) => `Tanggal: ${l}`}
+                  />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="spend"
+                    name="Pengeluaran (Rupiah)"
+                    stroke="#10b981"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#10b981", strokeWidth: 1 }}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="transactions"
+                    name="Frekuensi Transaksi"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: "#3b82f6", strokeWidth: 1 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-stone-400 text-sm italic">
+                Data aktivitas transaksi dalam timeline kosong. Lakukan transaksi untuk melihat grafik dinamika pengeluaran.
+              </div>
+            )
+          )}
+
+          {activeChartTab === "chats" && (
+            activityTimelineData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={activityTimelineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f5" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "#78716c" }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e7e5e4" }}
+                    tickFormatter={(v) => `${v} Pesan`}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #e7e5e4", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                    labelFormatter={(l) => `Tanggal: ${l}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="messages"
+                    name="Jumlah Chat Masuk"
+                    stroke="#8b5cf6"
+                    strokeWidth={3}
+                    dot={{ r: 5, fill: "#8b5cf6", strokeWidth: 2, stroke: "#fff" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-stone-400 text-sm italic">
+                Data aktivitas komunikasi WhatsApp kosong.
+              </div>
+            )
+          )}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* SECTION C: Interaction Timeline */}
@@ -630,54 +1024,9 @@ function CustomerDetail() {
             )}
           </div>
         </div>
-
-        {/* SECTION D: Suggested Actions */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-primary-900 mb-4">
-            Rekomendasi Tindakan
-          </h2>
-
-          <div className="space-y-3 mb-6">
-            {suggestions.map((suggestion, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-3 p-3 bg-primary-50 rounded-lg hover:bg-primary-100 transition cursor-pointer"
-                onClick={() => {
-                  if (suggestion.type !== "none") {
-                    setShowCreateAction(true);
-                  }
-                }}
-              >
-                <span className="text-2xl">{suggestion.icon}</span>
-                <span className="flex-1 font-medium text-primary-800">
-                  {suggestion.text}
-                </span>
-                {suggestion.type !== "none" && (
-                  <Plus className="h-5 w-5 text-primary-400" />
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-3">
-            <Button
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => setShowCreateAction(true)}
-              className="flex-1"
-            >
-              Buat Action
-            </Button>
-            <Button
-              variant="outline"
-              icon={<History className="h-4 w-4" />}
-              onClick={() => setShowActionHistory(true)}
-              className="flex-1"
-            >
-              Riwayat ({actions?.total || 0})
-            </Button>
-          </div>
-        </div>
       </div>
+      </>
+      )}
 
       {/* Modals */}
       <CreateActionModal
@@ -700,7 +1049,7 @@ function TimelineItem({ item, type }) {
   if (type === "transactions") {
     return (
       <div className="flex items-start gap-3 p-3 border-l-4 border-primary-500 bg-primary-50 rounded-r-lg">
-        <span className="text-xl">📅</span>
+        <Calendar className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
         <div className="flex-1">
           <div className="flex justify-between items-start">
             <span className="font-medium text-primary-900">
@@ -726,7 +1075,7 @@ function TimelineItem({ item, type }) {
         isNegative ? "border-red-500 bg-red-50" : "border-primary-300 bg-primary-50"
       }`}
     >
-      <span className="text-xl">💬</span>
+      <MessageSquare className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
       <div className="flex-1">
         <div className="flex items-center gap-2 mb-1">
           {item.sentiment === "negative" && <Badge color="red">Negatif</Badge>}

@@ -27,7 +27,7 @@ function CustomerCard({ customer }) {
             </div>
           </div>
         </div>
-        <RiskLevelBadge score={customer.risk_score} />
+        <RiskLevelBadge score={customer.risk_score} level={customer.risk_label} />
       </div>
 
       <div className="mb-3">

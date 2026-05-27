@@ -20,13 +20,14 @@ KEY CHANGES from v2:
 
 Features must be:
   - Temporal-safe (no future leakage)
-  - From VERIFIED linked records only
+  - From trusted linked records only
   - Deviation-normalized per user
   - Smoothed to reduce noise
 """
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -43,8 +44,9 @@ from app.services.feature_config import FeatureConfig
 
 logger = logging.getLogger(__name__)
 
-# ML only uses verified identity (human-validated)
-LINK_STATUS_FOR_ML = ['verified']
+# For this dataset, exact phone matches are accepted as trusted evidence.
+# "verified" remains supported for future manual validation workflows.
+LINK_STATUS_FOR_ML = ['verified', 'probable']
 
 # Dashboard can use probable
 LINK_STATUS_FOR_DASHBOARD = ['verified', 'probable']
@@ -125,6 +127,27 @@ class FeatureService:
         """Get expected feature count"""
         return len(cls.FEATURE_SCHEMA)
 
+    @staticmethod
+    def get_default_as_of_date() -> date:
+        """
+        Anchor feature windows to the latest event in the dataset.
+
+        This avoids making historical/static datasets look artificially stale
+        just because the server date moved forward.
+        """
+        max_tx = db.session.query(func.max(Transaction.tx_date)).filter(
+            Transaction.status == "completed"
+        ).scalar()
+        max_msg = db.session.query(func.max(FeedbackRaw.timestamp)).scalar()
+
+        candidates = []
+        for value in (max_tx, max_msg):
+            if value is None:
+                continue
+            candidates.append(value.date() if hasattr(value, "date") else value)
+
+        return max(candidates) if candidates else date.today()
+
     # =========================================================================
     # PUBLIC API — Feature Persistence (writes to DB, same schema as before)
     # =========================================================================
@@ -132,7 +155,7 @@ class FeatureService:
     def populate_all_features(self, customer_id: str, as_of_date: Optional[date] = None) -> Dict[str, Any]:
         """Populate all ML feature tables"""
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = self.get_default_as_of_date()
         return {
             "numeric_features": self.populate_numeric_features(customer_id, as_of_date),
             "text_signals": self.populate_text_signals(customer_id, as_of_date)
@@ -147,7 +170,7 @@ class FeatureService:
         on-the-fly in get_ml_feature_vector() — not stored in DB.
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = self.get_default_as_of_date()
 
         existing = CustomerNumericFeatures.query.filter_by(
             customer_id=customer_id, as_of_date=as_of_date
@@ -209,10 +232,10 @@ class FeatureService:
     def populate_text_signals(self, customer_id: str, as_of_date: Optional[date] = None) -> CustomerTextSignals:
         """
         Behavioral signals from text (ML sees).
-        Only VERIFIED links. NO embedding.
+        Uses trusted links only. NO embedding.
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = self.get_default_as_of_date()
 
         thirty_days_ago = as_of_date - timedelta(days=30)
         seven_days_ago = as_of_date - timedelta(days=7)
@@ -228,19 +251,21 @@ class FeatureService:
         if not existing:
             db.session.add(signals)
 
-        verified_features = db.session.query(FeedbackFeatures, FeedbackLinked).join(
+        trusted_rows = db.session.query(FeedbackFeatures, FeedbackRaw).join(
             FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+        ).join(
+            FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
         ).filter(
             FeedbackLinked.customer_id == customer_id,
             FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
-            FeedbackFeatures.processed_at >= start_dt_30,
-            FeedbackFeatures.processed_at <= end_dt
+            FeedbackRaw.timestamp >= start_dt_30,
+            FeedbackRaw.timestamp <= end_dt
         ).all()
 
-        features_30d = [f for f, _ in verified_features]
+        features_30d = [f for f, _ in trusted_rows]
 
         signals.msg_count_30d = len(features_30d)
-        signals.msg_count_7d = len([f for f in features_30d if f.processed_at >= start_dt_7])
+        signals.msg_count_7d = len([raw for _, raw in trusted_rows if raw.timestamp >= start_dt_7])
 
         if features_30d:
             complaint_count = len([f for f in features_30d if f.has_complaint])
@@ -252,9 +277,17 @@ class FeatureService:
             delays = [f.response_time_secs for f in features_30d if f.response_time_secs]
             signals.response_delay_mean = float(np.mean(delays)) if delays else 0.0
 
-            signals.msg_volatility = self._calculate_msg_volatility_from_features(
-                features_30d, thirty_days_ago, as_of_date
-            )
+            daily_counts = {}
+            for _, raw in trusted_rows:
+                day = raw.timestamp.date()
+                daily_counts[day] = daily_counts.get(day, 0) + 1
+
+            counts = []
+            current = thirty_days_ago
+            while current <= as_of_date:
+                counts.append(daily_counts.get(current, 0))
+                current += timedelta(days=1)
+            signals.msg_volatility = float(np.std(counts)) if counts else 0.0
         else:
             signals.complaint_rate_30d = 0.0
             signals.avg_msg_length_30d = 0.0
@@ -275,7 +308,7 @@ class FeatureService:
         Reads persisted base features + computes derived features on-the-fly.
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = self.get_default_as_of_date()
 
         numeric = CustomerNumericFeatures.query.filter_by(
             customer_id=customer_id, as_of_date=as_of_date
@@ -353,7 +386,7 @@ class FeatureService:
     def get_ml_feature_dict(self, customer_id: str, as_of_date: Optional[date] = None) -> Optional[Dict[str, float]]:
         """Get feature dict with names for SHAP (v3 schema)"""
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = self.get_default_as_of_date()
 
         vector = self.get_ml_feature_vector(customer_id, as_of_date)
         if vector is None:
@@ -368,28 +401,29 @@ class FeatureService:
         as_of: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
-        PURE FUNCTION: Build v3 feature vector from VERIFIED evidence only.
+        PURE FUNCTION: Build v3 feature vector from trusted evidence only.
 
         NO SIDE EFFECTS: No DB writes, deterministic for given as_of.
         """
         if as_of is None:
-            as_of = datetime.utcnow()
+            as_of = datetime.combine(self.get_default_as_of_date(), datetime.max.time())
 
         as_of_date = as_of.date() if hasattr(as_of, 'date') else as_of
 
         # === IDENTITY ENFORCEMENT ===
-        verified_feedback = FeedbackLinked.query.filter(
+        trusted_feedback = FeedbackLinked.query.filter(
             FeedbackLinked.customer_id == customer_id,
-            FeedbackLinked.link_status == 'verified',
+            FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
             FeedbackLinked.linked_at <= as_of
         )
-        verified_count = verified_feedback.count()
+        trusted_count = trusted_feedback.count()
 
-        if verified_count == 0:
+        if trusted_count == 0:
             total = FeedbackLinked.query.filter_by(customer_id=customer_id).count()
             raise PermissionError(
                 f"Cannot build features: customer {customer_id} has {total} feedback links "
-                f"but ZERO are 'verified' as of {as_of.isoformat()}. ML requires verified identity."
+                f"but ZERO trusted links as of {as_of.isoformat()}. "
+                f"Accepted statuses: {', '.join(LINK_STATUS_FOR_ML)}."
             )
 
         # === TIME BOUNDARIES ===
@@ -452,30 +486,31 @@ class FeatureService:
         # === INTERACTION ===
         trend_mag_interaction = freq_trend * magnitude["activity_mean"]
 
-        # === TEXT SIGNALS (from VERIFIED feedback, most recent window) ===
-        verified_features_current = db.session.query(FeedbackFeatures).join(
+        # === TEXT SIGNALS (from trusted feedback, most recent window) ===
+        trusted_features_current = db.session.query(FeedbackFeatures, FeedbackRaw).join(
             FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+        ).join(
+            FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
         ).filter(
             FeedbackLinked.customer_id == customer_id,
-            FeedbackLinked.link_status == 'verified',
-            FeedbackFeatures.processed_at >= thirty_days_ago,
-            FeedbackFeatures.processed_at <= as_of_dt
+            FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+            FeedbackRaw.timestamp >= thirty_days_ago,
+            FeedbackRaw.timestamp <= as_of_dt
         ).order_by(FeedbackFeatures.feature_id).all()
 
-        msg_count_30d = len(verified_features_current)
+        msg_count_30d = len(trusted_features_current)
 
-        if verified_features_current:
-            complaint_count = len([f for f in verified_features_current if f.has_complaint])
+        if trusted_features_current:
+            complaint_count = len([f for f, _ in trusted_features_current if f.has_complaint])
             complaint_ratio = complaint_count / msg_count_30d
 
-            delays = [f.response_time_secs for f in verified_features_current if f.response_time_secs]
+            delays = [f.response_time_secs for f, _ in trusted_features_current if f.response_time_secs]
             response_delay_mean = float(np.mean(delays)) if delays else 0.0
 
             daily_counts = {}
-            for f in verified_features_current:
-                if f.processed_at:
-                    day = f.processed_at.date()
-                    daily_counts[day] = daily_counts.get(day, 0) + 1
+            for _, raw in trusted_features_current:
+                day = raw.timestamp.date()
+                daily_counts[day] = daily_counts.get(day, 0) + 1
             counts = list(daily_counts.values()) if daily_counts else [0]
             msg_volatility = float(np.std(counts)) if len(counts) > 1 else 0.0
         else:
@@ -531,7 +566,9 @@ class FeatureService:
             "feature_schema_hash": self.get_feature_schema_hash(),
             "feature_service_version": self.FEATURE_SCHEMA_VERSION,
             "feature_config": self.config.to_dict(),
-            "verified_feedback_count": verified_count,
+            "trusted_feedback_count": trusted_count,
+            "trusted_feedback_used": msg_count_30d,
+            "verified_feedback_count": trusted_count,
             "verified_feedback_used": msg_count_30d,
             "feature_window_days": self.config.window_size_days,
             "as_of": as_of.isoformat(),
@@ -684,7 +721,7 @@ class FeatureService:
         as_of_date: date
     ) -> List[float]:
         """
-        Compute per-window message count series (any link status for non-verified path).
+        Compute per-window message count series from trusted links.
 
         Args:
             customer_id: Customer UUID
@@ -706,11 +743,13 @@ class FeatureService:
 
             count = db.session.query(func.count(FeedbackFeatures.feature_id)).join(
                 FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+            ).join(
+                FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
             ).filter(
                 FeedbackLinked.customer_id == customer_id,
                 FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
-                FeedbackFeatures.processed_at >= window_start,
-                FeedbackFeatures.processed_at <= window_end
+                FeedbackRaw.timestamp >= window_start,
+                FeedbackRaw.timestamp <= window_end
             ).scalar() or 0
 
             series.append(float(count))
@@ -723,7 +762,7 @@ class FeatureService:
         as_of_date: date
     ) -> List[float]:
         """
-        Compute per-window message count series (VERIFIED only, for build_verified_features).
+        Compute per-window message count series from trusted links.
         """
         cfg = self.config
         series = []
@@ -738,11 +777,13 @@ class FeatureService:
 
             count = db.session.query(func.count(FeedbackFeatures.feature_id)).join(
                 FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+            ).join(
+                FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
             ).filter(
                 FeedbackLinked.customer_id == customer_id,
-                FeedbackLinked.link_status == 'verified',
-                FeedbackFeatures.processed_at >= window_start,
-                FeedbackFeatures.processed_at <= window_end
+                FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+                FeedbackRaw.timestamp >= window_start,
+                FeedbackRaw.timestamp <= window_end
             ).scalar() or 0
 
             series.append(float(count))
@@ -943,7 +984,11 @@ class FeatureService:
     def _compute_sentiment_features(self, customer_id: str, as_of_date: date) -> dict:
         """
         Compute sentiment features.
-        Priority: 1) Pre-computed semantics table  2) Live SentimentService  3) Default 0.0
+        Priority: 1) Pre-computed semantics table  2) Default 0.0.
+
+        Live sentiment inference is disabled by default because batch feature
+        generation and model training must be deterministic and must not try to
+        load/download NLP models when a cutoff snapshot has no semantics yet.
         """
         avg_score = 0.0
         prior_score = 0.0
@@ -968,8 +1013,7 @@ class FeatureService:
 
                 if prior_sem and prior_sem.avg_sentiment_score is not None:
                     prior_score = float(prior_sem.avg_sentiment_score)
-            else:
-                # Fallback: compute live using SentimentService
+            elif os.getenv("ENABLE_LIVE_SENTIMENT_FEATURES", "").lower() in {"1", "true", "yes"}:
                 avg_score, prior_score = self._compute_live_sentiment(customer_id, as_of_date)
 
         except Exception as e:

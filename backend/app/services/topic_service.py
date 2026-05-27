@@ -85,12 +85,21 @@ class TopicService:
                 logger.info("Initializing new BERTopic model")
                 # Initialize with embedding model
                 from sentence_transformers import SentenceTransformer
+                from hdbscan import HDBSCAN
                 self.embedding_model = SentenceTransformer(
                     'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
                 )
+                hdbscan_model = HDBSCAN(
+                    min_cluster_size=50,
+                    min_samples=10,
+                    metric="euclidean",
+                    prediction_data=True,
+                )
                 self.topic_model = BERTopic(
                     embedding_model=self.embedding_model,
+                    hdbscan_model=hdbscan_model,
                     language="indonesian",
+                    nr_topics=30,
                     verbose=False
                 )
                 self.model_version = version or "new_untrained"
@@ -106,9 +115,10 @@ class TopicService:
         return self.topic_model is not None
     
     def train(
-        self, 
-        texts: List[str], 
-        embeddings: Optional[np.ndarray] = None
+        self,
+        texts: List[str],
+        embeddings: Optional[np.ndarray] = None,
+        target_topics: Optional[int] = None,
     ) -> Dict[str, any]:
         """
         Train topic model on corpus
@@ -130,6 +140,10 @@ class TopicService:
             topics, probs = self.topic_model.fit_transform(texts, embeddings)
         else:
             topics, probs = self.topic_model.fit_transform(texts)
+
+        if target_topics:
+            topics = self.topic_model.reduce_topics(texts, nr_topics=target_topics)
+            probs = None
         
         # Get topic info
         topic_info = self.topic_model.get_topic_info()

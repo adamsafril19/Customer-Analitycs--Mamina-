@@ -16,8 +16,9 @@ from app.models.prediction import ChurnPrediction
 from app.models.numeric_features import CustomerNumericFeatures
 from app.models.text_signals import CustomerTextSignals
 from app.models.text_semantics import CustomerTextSemantics
-from app.models.feedback import FeedbackFeatures
+from app.models.feedback import FeedbackFeatures, FeedbackRaw
 from app.models.topic import ShapCache
+from app.services.feature_service import FeatureService
 from app.utils.errors import NotFoundError, ValidationError
 from app.utils.validators import validate_uuid, validate_pagination, validate_required_fields
 from app.utils.auth import hash_phone_number
@@ -59,10 +60,18 @@ def get_customer_360(customer_id: str):
     if not customer:
         raise NotFoundError(f"Customer {customer_id} not found")
     
+    feature_service = FeatureService()
+    as_of_date = feature_service.get_default_as_of_date()
+
     # Get numeric features (RFM + tenure)
     numeric = CustomerNumericFeatures.query.filter_by(
-        customer_id=customer_uuid
-    ).order_by(CustomerNumericFeatures.as_of_date.desc()).first()
+        customer_id=customer_uuid,
+        as_of_date=as_of_date,
+    ).first()
+    if not numeric:
+        numeric = CustomerNumericFeatures.query.filter_by(
+            customer_id=customer_uuid
+        ).order_by(CustomerNumericFeatures.as_of_date.desc()).first()
     
     numeric_features = {}
     if numeric:
@@ -70,14 +79,30 @@ def get_customer_360(customer_id: str):
             "r_score": numeric.r_score,
             "f_score": numeric.f_score,
             "m_score": numeric.m_score,
+            "recency_days": numeric.recency_days,
+            "tx_count_30d": numeric.tx_count_30d,
+            "tx_count_90d": numeric.tx_count_90d,
+            "spend_30d": numeric.spend_30d,
+            "spend_90d": numeric.spend_90d,
+            "avg_tx_value": numeric.avg_tx_value,
             "tenure_days": numeric.tenure_days,
             "as_of_date": numeric.as_of_date.isoformat() if numeric.as_of_date else None
         }
+
+    ml_features = feature_service.get_ml_feature_dict(str(customer_uuid), as_of_date) or {}
+    if ml_features:
+        numeric_features.update(ml_features)
+        numeric_features["as_of_date"] = as_of_date.isoformat()
     
     # Get text signals (behavioral patterns - ML sees this)
     signals = CustomerTextSignals.query.filter_by(
-        customer_id=customer_uuid
-    ).order_by(CustomerTextSignals.as_of_date.desc()).first()
+        customer_id=customer_uuid,
+        as_of_date=as_of_date,
+    ).first()
+    if not signals:
+        signals = CustomerTextSignals.query.filter_by(
+            customer_id=customer_uuid
+        ).order_by(CustomerTextSignals.as_of_date.desc()).first()
     
     text_signals = {}
     if signals:
@@ -93,17 +118,41 @@ def get_customer_360(customer_id: str):
         }
     
     # Get text semantics (dashboard only - for explanation)
-    semantics = CustomerTextSemantics.query.filter_by(
-        customer_id=customer_uuid
+    semantics_query = CustomerTextSemantics.query.filter_by(customer_id=customer_uuid)
+    semantics = semantics_query.filter(
+        db.or_(
+            CustomerTextSemantics.sentiment_dist.isnot(None),
+            CustomerTextSemantics.top_topic_counts.isnot(None),
+            CustomerTextSemantics.top_keywords.isnot(None),
+            CustomerTextSemantics.top_complaint_types.isnot(None),
+        )
     ).order_by(CustomerTextSemantics.as_of_date.desc()).first()
+    if not semantics:
+        semantics = semantics_query.order_by(CustomerTextSemantics.as_of_date.desc()).first()
     
     text_semantics = {}
     if semantics:
+        top_keywords = semantics.top_keywords or []
+        if isinstance(top_keywords, dict):
+            top_keywords = [
+                keyword
+                for keyword, _ in sorted(
+                    top_keywords.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[:10]
+            ]
+
         text_semantics = {
-            "top_topic_counts": semantics.top_topic_counts,
-            "sentiment_dist": semantics.sentiment_dist,
-            "top_keywords": semantics.top_keywords,
-            "top_complaint_types": semantics.top_complaint_types,
+            "as_of_date": semantics.as_of_date.isoformat() if semantics.as_of_date else None,
+            "top_topic_counts": semantics.top_topic_counts or {},
+            "avg_topic_similarity": semantics.avg_topic_similarity or 0,
+            "topic_model_version": semantics.topic_model_version,
+            "sentiment_dist": semantics.sentiment_dist or {},
+            "avg_sentiment_score": semantics.avg_sentiment_score or 0,
+            "sentiment_model_version": semantics.sentiment_model_version,
+            "top_keywords": top_keywords,
+            "top_complaint_types": semantics.top_complaint_types or {},
             "dominant_topic": semantics.get_dominant_topic(),
             "dominant_sentiment": semantics.get_dominant_sentiment()
         }
@@ -129,34 +178,63 @@ def get_customer_360(customer_id: str):
     
     prediction_data = None
     if latest_prediction:
+        cache = ShapCache.query.filter_by(pred_id=latest_prediction.pred_id).first()
+        explanation_available = bool(cache and cache.explanation_type == "shap" and cache.shap_top)
         prediction_data = {
             "pred_id": str(latest_prediction.pred_id),
             "risk_score": latest_prediction.churn_score,
             "risk_label": latest_prediction.churn_label,
-            "top_reasons": latest_prediction.top_reasons,
+            "top_reasons": cache.shap_top if explanation_available else [],
+            "explanation_available": explanation_available,
+            "explanation_status": "available" if explanation_available else "SHAP explanation belum tersedia",
             "model_version": latest_prediction.model_version,
             "as_of_date": latest_prediction.as_of_date.isoformat() if latest_prediction.as_of_date else None
         }
         
         # Get cached SHAP
-        cache = ShapCache.query.filter_by(pred_id=latest_prediction.pred_id).first()
         if cache:
             prediction_data["shap_cached"] = True
+            prediction_data["explanation_type"] = cache.explanation_type
             prediction_data["nearest_messages"] = cache.nearest_messages
     
-    # Get last messages for drilldown
+    # Get recent-window messages from semantic snapshot for drilldown.
     last_messages = []
     if semantics and semantics.last_n_msg_ids:
-        for msg_id in semantics.last_n_msg_ids[:5]:
-            fb = FeedbackFeatures.query.filter_by(msg_id=msg_id).first()
-            if fb and fb.feedback_raw:
-                text = fb.feedback_raw.text or ""
+        for msg_ref in semantics.last_n_msg_ids[:5]:
+            msg_id = msg_ref.get("msg_id") if isinstance(msg_ref, dict) else msg_ref
+            row = db.session.query(FeedbackFeatures, FeedbackRaw).join(
+                FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
+            ).filter(FeedbackFeatures.msg_id == msg_id).first()
+            if row:
+                fb, raw = row
+                text = raw.text or ""
                 last_messages.append({
                     "msg_id": str(fb.msg_id),
                     "text_snippet": text[:100] + "..." if len(text) > 100 else text,
-                    "sentiment_label": fb.sentiment_label,
+                    "dominant_sentiment": semantics.get_dominant_sentiment(),
+                    "sentiment_label": semantics.get_dominant_sentiment(),
                     "has_complaint": fb.has_complaint
                 })
+
+    # Historical messages are separate from the predictive 30-day window.
+    # This prevents a customer with old conversations from looking like they
+    # have current-window NLP signal.
+    historical_messages = []
+    historical_rows = db.session.query(FeedbackRaw, FeedbackFeatures).join(
+        FeedbackFeatures, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
+    ).filter(
+        FeedbackFeatures.customer_id == customer_uuid
+    ).order_by(FeedbackRaw.timestamp.desc()).limit(5).all()
+    for raw, fb in historical_rows:
+        text = raw.text or ""
+        historical_messages.append({
+            "msg_id": str(raw.msg_id),
+            "timestamp": raw.timestamp.isoformat() if raw.timestamp else None,
+            "direction": raw.direction,
+            "text_snippet": text[:140] + "..." if len(text) > 140 else text,
+            "has_complaint": bool(fb.has_complaint),
+            "has_refund_request": bool(fb.has_refund_request),
+        })
     
     # Quick stats
     quick_stats = {
@@ -164,7 +242,8 @@ def get_customer_360(customer_id: str):
         "total_spent": transaction_summary["total_spent"],
         "last_visit": transaction_summary["last_transaction_date"],
         "message_count": text_signals.get("msg_count_30d", 0),
-        "complaint_rate": text_signals.get("complaint_rate_30d", 0)
+        "complaint_rate": text_signals.get("complaint_rate_30d", 0),
+        "avg_sentiment_30": text_semantics.get("avg_sentiment_score") or 0
     }
     
     return jsonify({
@@ -175,6 +254,7 @@ def get_customer_360(customer_id: str):
         "transaction_summary": transaction_summary,
         "latest_prediction": prediction_data,
         "last_messages": last_messages,
+        "historical_messages": historical_messages,
         "quick_stats": quick_stats
     })
 
@@ -215,12 +295,18 @@ def get_customer_timeline(customer_id: str):
     
     # Get feedback
     if timeline_type in ["messages", "feedback", "all"]:
-        feedbacks = FeedbackFeatures.query.filter_by(
-            customer_id=customer_uuid
+        feedbacks = db.session.query(FeedbackFeatures, FeedbackRaw).join(
+            FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
+        ).filter(
+            FeedbackFeatures.customer_id == customer_uuid
         ).order_by(FeedbackFeatures.processed_at.desc()).limit(limit).all()
         
-        for fb in feedbacks:
-            raw_text = fb.feedback_raw.text if fb.feedback_raw else None
+        semantics = CustomerTextSemantics.query.filter_by(
+            customer_id=customer_uuid
+        ).order_by(CustomerTextSemantics.as_of_date.desc()).first()
+
+        for fb, raw in feedbacks:
+            raw_text = raw.text if raw else None
             description = raw_text[:100] + "..." if raw_text and len(raw_text) > 100 else raw_text
             
             timeline_items.append({
@@ -228,7 +314,7 @@ def get_customer_timeline(customer_id: str):
                 "type": "feedback",
                 "date": fb.processed_at.isoformat() if fb.processed_at else None,
                 "description": description,
-                "sentiment": fb.sentiment_label,
+                "sentiment": semantics.get_dominant_sentiment() if semantics else None,
                 "has_complaint": fb.has_complaint
             })
     
@@ -249,6 +335,7 @@ def list_customers():
     search = request.args.get("search")
     is_active = request.args.get("is_active")
     risk_level = request.args.get("risk_level")
+    city = request.args.get("city")
     sort_by = request.args.get("sort", "name")  # 'name' or 'risk_score'
     sort_order = request.args.get("order", "asc")  # 'asc' or 'desc'
     limit = min(100, max(1, request.args.get("limit", 20, type=int)))
@@ -268,10 +355,13 @@ def list_customers():
     if is_active is not None:
         is_active_bool = str(is_active).lower() in ["true", "1"]
         query = query.filter_by(is_active=is_active_bool)
+
+    if city:
+        query = query.filter(Customer.city.ilike(f"%{city}%"))
     
-    # For risk_score sorting, join with latest predictions
-    if sort_by == "risk_score":
-        # Subquery: latest prediction per customer
+    if risk_level or sort_by == "risk_score":
+        # Subquery: latest prediction per customer. Risk filtering must use
+        # the same latest row that is shown in the table, not historical rows.
         latest_pred = db.session.query(
             ChurnPrediction.customer_id,
             func.max(ChurnPrediction.created_at).label("max_created")
@@ -293,29 +383,20 @@ def list_customers():
         
         total = query.count()
         
-        if sort_order == "desc":
-            query = query.order_by(
-                ChurnPrediction.churn_score.desc().nullslast()
-            )
+        if sort_by == "risk_score":
+            if sort_order == "desc":
+                query = query.order_by(
+                    ChurnPrediction.churn_score.desc().nullslast()
+                )
+            else:
+                query = query.order_by(
+                    ChurnPrediction.churn_score.asc().nullslast()
+                )
         else:
-            query = query.order_by(
-                ChurnPrediction.churn_score.asc().nullslast()
-            )
+            query = query.order_by(Customer.name)
         
         customers = query.offset(offset).limit(limit).all()
     else:
-        if risk_level:
-            # Filter by risk level requires joining predictions
-            customer_ids_with_risk = db.session.query(
-                ChurnPrediction.customer_id
-            ).filter(
-                ChurnPrediction.churn_label == risk_level
-            ).distinct().subquery()
-            
-            query = query.filter(
-                Customer.customer_id.in_(db.session.query(customer_ids_with_risk))
-            )
-        
         total = query.count()
         customers = query.order_by(Customer.name).offset(offset).limit(limit).all()
     
@@ -329,10 +410,26 @@ def list_customers():
         for p in preds:
             if p.customer_id not in predictions:
                 predictions[p.customer_id] = p
+
+    last_visits = {}
+    if customer_ids:
+        tx_rows = db.session.query(
+            Transaction.customer_id,
+            func.max(Transaction.tx_date).label("last_visit"),
+        ).filter(
+            Transaction.customer_id.in_(customer_ids),
+            Transaction.status == "completed",
+        ).group_by(Transaction.customer_id).all()
+        last_visits = {
+            customer_id: last_visit
+            for customer_id, last_visit in tx_rows
+        }
     
     result = []
     for c in customers:
         data = c.to_dict()
+        last_visit = last_visits.get(c.customer_id)
+        data["last_visit"] = last_visit.isoformat() if last_visit else None
         pred = predictions.get(c.customer_id)
         if pred:
             data["churn_score"] = round(pred.churn_score, 3) # Backward compatibility

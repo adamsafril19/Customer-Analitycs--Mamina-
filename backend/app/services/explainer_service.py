@@ -17,6 +17,7 @@ from sqlalchemy import text
 from app import db
 from app.models.topic import ShapCache
 from app.models.feedback import FeedbackFeatures
+from app.services.shap_wrapper import coerce_numeric_array
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,30 @@ class ExplainerService:
             )
         
         try:
-            features_array = np.array(features).reshape(1, -1)
-            shap_values = ml_service.shap_explainer.shap_values(features_array)
+            if hasattr(ml_service, "prepare_model_features"):
+                features_array = ml_service.prepare_model_features(features)
+            else:
+                features_array = coerce_numeric_array([features])
+            explainer = ml_service.shap_explainer
+
+            if hasattr(explainer, "shap_values"):
+                shap_values = explainer.shap_values(features_array)
+            else:
+                explanation = explainer(
+                    features_array,
+                    max_evals=(2 * features_array.shape[1]) + 1,
+                    silent=True,
+                )
+                shap_values = explanation.values
             
             # Handle different SHAP output formats
             if isinstance(shap_values, list):
                 # For tree-based models, use positive class
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+
+            shap_values = np.asarray(shap_values)
+            if shap_values.ndim == 3:
+                shap_values = shap_values[:, :, 1] if shap_values.shape[2] > 1 else shap_values[:, :, 0]
             
             return shap_values[0]  # Return first (only) sample
             
@@ -118,9 +136,9 @@ class ExplainerService:
         if shap_values is None:
             shap_values = self.calculate_shap_values(features)
         
-        # If SHAP still not available, use fallback
+        # If SHAP still not available, do not fabricate reasons.
         if shap_values is None:
-            return self._get_fallback_reasons(features, top_n)
+            return []
         
         # Get feature names and descriptions
         feature_names = ml_service.get_feature_names()
@@ -132,11 +150,28 @@ class ExplainerService:
                 f"Length mismatch: names={len(feature_names)}, "
                 f"features={len(features)}, shap={len(shap_values)}"
             )
-            return self._get_fallback_reasons(features, top_n)
+            return []
         
+        neutralized = set(ml_service.feature_metadata.get("neutralized_model_features", []))
+
+        feature_lookup = {
+            name: float(value or 0.0)
+            for name, value in zip(feature_names, features)
+        }
+
         # Create list of (index, shap_value, feature_value)
         feature_impacts = []
         for i, (shap_val, feat_val) in enumerate(zip(shap_values, features)):
+            if feature_names[i] in neutralized:
+                continue
+            if (
+                feature_names[i] == "recency_ratio"
+                and feature_lookup.get("recency_days", 0.0) >= 90
+                and feature_lookup.get("tx_count_90d", 0.0) <= 0
+            ):
+                # For long-inactive customers, recency_days is the clearer and
+                # more stable operational driver than the derived ratio.
+                continue
             feature_impacts.append({
                 "feature": feature_names[i],
                 "shap_value": float(shap_val),
@@ -234,10 +269,10 @@ class ExplainerService:
                     ff.msg_id,
                     fr.text,
                     fr.timestamp,
-                    ff.sentiment_label,
-                    ff.topic_id,
+                    ff.has_complaint,
+                    ff.has_refund_request,
                     fl.link_status,
-                    ff.embedding <=> :query_embedding::vector AS distance
+                    ff.embedding <=> CAST(:query_embedding AS vector) AS distance
                 FROM feedback_features ff
                 JOIN feedback_raw fr ON ff.msg_id = fr.msg_id
                 JOIN feedback_linked fl ON ff.link_id = fl.link_id
@@ -245,7 +280,7 @@ class ExplainerService:
                   AND fl.link_status IN ('verified', 'probable')
                   AND ff.embedding IS NOT NULL
                   AND ff.processed_at <= :as_of
-                ORDER BY ff.embedding <=> :query_embedding::vector
+                ORDER BY ff.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
             
@@ -274,8 +309,8 @@ class ExplainerService:
                     # Content
                     "text_snippet": text_snippet,
                     "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                    "sentiment_label": row.sentiment_label,
-                    "topic_id": str(row.topic_id) if row.topic_id else None,
+                    "has_complaint": bool(row.has_complaint),
+                    "has_refund_request": bool(row.has_refund_request),
                     "link_status": row.link_status,
                     "similarity_score": round(similarity, 4),
                     # SEMANTIC DRIFT WARNING
@@ -286,6 +321,7 @@ class ExplainerService:
             
         except Exception as e:
             logger.error(f"Error finding nearest messages: {e}")
+            db.session.rollback()
             return []
     
     def compute_and_cache_shap(
@@ -321,13 +357,12 @@ class ExplainerService:
             # Calculate SHAP
             shap_values = self.calculate_shap_values(features)
             
-            # Determine explanation type
-            if shap_values is not None:
-                top_reasons = self.get_top_reasons(features, shap_values)
-                explanation_type = "shap"
-            else:
-                top_reasons = self._get_fallback_reasons(features, 5)
-                explanation_type = "heuristic"
+            if shap_values is None:
+                logger.warning(f"SHAP unavailable for prediction {pred_id}; cache not written")
+                return None
+
+            top_reasons = self.get_top_reasons(features, shap_values)
+            explanation_type = "shap"
             
             # Get nearest messages with temporal anchor
             nearest_messages = self.get_nearest_messages(customer_id, as_of=as_of)
@@ -343,6 +378,14 @@ class ExplainerService:
                     db.session.add(cache)
                 
                 cache.shap_top = top_reasons
+                cache.shap_values = [
+                    {
+                        "feature": item["feature"],
+                        "value": item["value"],
+                        "contribution": item["impact"],
+                    }
+                    for item in top_reasons
+                ]
                 # NOTE: nearest_messages = semantic similarity, NOT causal attribution
                 cache.nearest_messages = nearest_messages
                 cache.computed_at = datetime.utcnow()
@@ -541,10 +584,11 @@ class ExplainerService:
                 return f"Baru saja bertransaksi ({direction} {risk_word})"
         
         elif feature_name == "tenure_days":
-            if shap_value > 0:
-                return f"Customer baru (tenure pendek) ({direction} {risk_word})"
-            else:
-                return f"Customer loyal (tenure panjang) ({direction} {risk_word})"
+            if feature_value < 90:
+                return f"Tenure masih pendek ({direction} {risk_word})"
+            if feature_value < 180:
+                return f"Tenure relatif baru ({direction} {risk_word})"
+            return f"Tenure panjang sebagai konteks historis ({direction} {risk_word})"
         
         # === MAGNITUDE FEATURES ===
         elif feature_name == "activity_mean":

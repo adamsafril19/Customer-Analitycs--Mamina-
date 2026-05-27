@@ -43,7 +43,7 @@ export function formatRelativeTime(date) {
  * Get risk level from behavioral risk score (0-1)
  */
 export function getRiskLevel(score) {
-  if (score >= 0.7) return "high";
+  if (score >= 0.9) return "high";
   if (score >= 0.4) return "medium";
   return "low";
 }
@@ -349,11 +349,9 @@ export const ACTION_SUGGESTIONS = {
  */
 export const ACTION_TYPE_LABELS = {
   call: "Telepon/WhatsApp",
-  message: "Kirim Pesan",
   promo: "Promo/Diskon",
-  reminder: "Reminder",
   visit: "Kunjungan",
-  other: "Lainnya",
+  email: "Email",
 };
 
 /**

@@ -14,6 +14,7 @@ from typing import Optional
 from collections import Counter
 
 import numpy as np
+from flask import current_app
 
 from app import db
 from app.models.feedback import FeedbackRaw, FeedbackLinked
@@ -50,6 +51,35 @@ class SemanticService:
             from app.services.topic_service import TopicService
             self._topic_service = TopicService()
         return self._topic_service
+
+    def ensure_models_loaded(self) -> None:
+        """
+        Load NLP models required for semantic processing.
+
+        In strict mode, missing sentiment/topic models are hard failures so the
+        pipeline cannot report success with silently empty semantic columns.
+        """
+        strict = bool(current_app.config.get("NLP_STRICT", True))
+        topic_model_path = current_app.config.get("TOPIC_MODEL_PATH")
+
+        if strict and not self.topic_service.is_model_loaded() and not topic_model_path:
+            raise RuntimeError("TOPIC_MODEL_PATH is required when NLP_STRICT=true")
+
+        if not self.sentiment_service.is_model_loaded():
+            try:
+                self.sentiment_service.load_model()
+            except Exception as exc:
+                if strict:
+                    raise RuntimeError(f"Sentiment model is required but failed to load: {exc}") from exc
+                logger.warning(f"Sentiment model unavailable: {exc}")
+
+        if not self.topic_service.is_model_loaded():
+            try:
+                self.topic_service.load_model(model_path=topic_model_path)
+            except Exception as exc:
+                if strict:
+                    raise RuntimeError(f"Topic model is required but failed to load: {exc}") from exc
+                logger.warning(f"Topic model unavailable: {exc}")
     
     def populate_text_semantics(
         self, 
@@ -102,11 +132,14 @@ class SemanticService:
             semantics.sentiment_dist = None
             semantics.avg_sentiment_score = None
             semantics.top_topic_counts = None
-            semantics.avg_topic_confidence = None
+            semantics.avg_topic_similarity = None
             semantics.top_keywords = None
             semantics.top_complaint_types = None
             db.session.commit()
             return semantics
+
+        self.ensure_models_loaded()
+        strict = bool(current_app.config.get("NLP_STRICT", True))
         
         # === SENTIMENT (on-the-fly) ===
         sentiment_counts = Counter()
@@ -119,9 +152,13 @@ class SemanticService:
                     sentiment_counts[label] += 1
                     sentiment_scores.append(score)
                 except Exception as e:
+                    if strict:
+                        raise RuntimeError(f"Sentiment failed for msg {msg.msg_id}: {e}") from e
                     logger.warning(f"Sentiment failed for msg {msg.msg_id}: {e}")
         semantics.sentiment_dist = dict(sentiment_counts) if sentiment_counts else None
         semantics.avg_sentiment_score = float(np.mean(sentiment_scores)) if sentiment_scores else None
+        if strict and not sentiment_scores:
+            raise RuntimeError("Sentiment model produced no scores for non-empty messages")
         # Store model version for semantic continuity
         semantics.sentiment_model_version = self.sentiment_service.get_model_version() if self.sentiment_service.is_model_loaded() else None
         
@@ -139,8 +176,12 @@ class SemanticService:
                         if similarity is not None:
                             topic_similarities.append(similarity)
             except Exception as e:
+                if strict:
+                    raise RuntimeError(f"Topic prediction failed: {e}") from e
                 logger.warning(f"Topic prediction failed: {e}")
         semantics.top_topic_counts = dict(topic_counts.most_common(5)) if topic_counts else None
+        if strict and texts and not topic_counts:
+            raise RuntimeError("Topic model produced no topics for non-empty messages")
         # NOTE: This measures embedding clustering, NOT topic certainty
         semantics.avg_topic_similarity = float(np.mean(topic_similarities)) if topic_similarities else None
         # Store model version for semantic continuity

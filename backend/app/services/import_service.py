@@ -23,10 +23,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, List, Optional, Tuple
 
 import pandas as pd
+import sqlalchemy as sa
 from app import db
 from app.models.customer import Customer
 from app.models.transaction import Transaction
-from app.models.feedback import FeedbackRaw, FeedbackLinked
+from app.models.feedback import FeedbackRaw
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,10 @@ TRANSACTION_REQUIRED_COLS = [
     "transaction_id", "customer_id", "transaction_date",
     "transaction_amount", "service_type", "transaction_status"
 ]
-TRANSACTION_VALID_STATUSES = {"completed", "canceled", "refunded"}
+TRANSACTION_VALID_STATUSES = {"completed", "cancelled", "refunded"}
 
 MESSAGE_REQUIRED_COLS = [
-    "message_id", "customer_id", "message_timestamp",
+    "message_id", "phone_number", "message_timestamp",
     "sender_type", "message_text"
 ]
 MESSAGE_VALID_SENDER_TYPES = {"customer", "admin"}
@@ -504,18 +505,18 @@ class CSVImportService:
         if schema_errors:
             return {"success": False, "validation": {"valid_rows": 0, "invalid_rows": len(df), "errors": schema_errors}}
 
-        valid_cids = set()
-        for row in db.session.query(Customer.external_id).filter(Customer.external_id.isnot(None)).all():
-            valid_cids.add(row[0])
+        valid_phones = set()
+        for row in db.session.query(Customer.phone_hash).filter(Customer.phone_hash.isnot(None)).all():
+            valid_phones.add(row[0])
 
         errors = []
         seen_ids = set()
-        invalid_fk = 0
+        invalid_phone_fk = 0
 
         for idx, row in df.iterrows():
             row_num = idx + 2
             mid = str(row.get("message_id", "")).strip()
-            cid = str(row.get("customer_id", "")).strip()
+            phone = str(row.get("phone_number", "")).strip()
 
             if not mid:
                 errors.append({"row": row_num, "column": "message_id", "message": "Empty message_id"})
@@ -524,9 +525,11 @@ class CSVImportService:
             else:
                 seen_ids.add(mid)
 
-            if cid and cid not in valid_cids:
-                errors.append({"row": row_num, "column": "customer_id", "message": f"Customer not found: {cid}"})
-                invalid_fk += 1
+            if not phone:
+                errors.append({"row": row_num, "column": "phone_number", "message": "Empty phone_number"})
+            elif self._hash_phone(phone) not in valid_phones:
+                errors.append({"row": row_num, "column": "phone_number", "message": "Phone number not found in customer_master"})
+                invalid_phone_fk += 1
 
             sender = str(row.get("sender_type", "")).strip().lower()
             if sender and sender not in MESSAGE_VALID_SENDER_TYPES:
@@ -544,7 +547,7 @@ class CSVImportService:
                 break
 
         summary = self._compute_summary(df, "message_id", "message_timestamp")
-        summary["invalid_fk"] = invalid_fk
+        summary["invalid_phone_fk"] = invalid_phone_fk
         valid_rows = len(df) - len(set(e["row"] for e in errors))
 
         return {
@@ -565,22 +568,32 @@ class CSVImportService:
     def import_messages(self, file_storage) -> Dict[str, Any]:
         """
         Import WhatsApp message CSV.
-        Creates FeedbackRaw + auto-creates FeedbackLinked (since CSV has customer_id).
+        Creates FeedbackRaw, then maps messages to customers through LinkingService.
         """
+        if self._feedback_raw_customer_id_is_not_null():
+            return {
+                "success": False,
+                "imported": 0,
+                "skipped": 0,
+                "errors": [{
+                    "row": 0,
+                    "column": "feedback_raw.customer_id",
+                    "message": (
+                        "Database schema masih legacy: feedback_raw.customer_id masih NOT NULL. "
+                        "Jalankan migration 025_feedback_raw_identity_nullable / alembic upgrade head "
+                        "pada database backend yang sedang dipakai."
+                    ),
+                }],
+            }
+
         df = self._parse_csv(file_storage)
         schema_errors = self._validate_schema(df, MESSAGE_REQUIRED_COLS)
         if schema_errors:
             return {"success": False, "imported": 0, "skipped": 0, "errors": schema_errors}
 
-        # Build customer mapping
-        cid_map = {}
-        phone_map = {}
-        for row in db.session.query(Customer.external_id, Customer.customer_id, Customer.phone_hash).filter(
-            Customer.external_id.isnot(None)
-        ).all():
-            cid_map[row[0]] = row[1]
-            if row[2]:
-                phone_map[row[0]] = row[2]
+        valid_phones = set()
+        for row in db.session.query(Customer.phone_hash).filter(Customer.phone_hash.isnot(None)).all():
+            valid_phones.add(row[0])
 
         imported = 0
         skipped = 0
@@ -592,7 +605,7 @@ class CSVImportService:
             for idx, row in df.iterrows():
                 row_num = idx + 2
                 mid = str(row.get("message_id", "")).strip()
-                cid = str(row.get("customer_id", "")).strip()
+                phone = str(row.get("phone_number", "")).strip()
                 ts_str = str(row.get("message_timestamp", "")).strip()
                 sender = str(row.get("sender_type", "")).strip().lower()
                 text = str(row.get("message_text", "")).strip()
@@ -602,8 +615,14 @@ class CSVImportService:
                     continue
                 seen_mids.add(mid)
 
-                if cid not in cid_map:
-                    errors.append({"row": row_num, "column": "customer_id", "message": f"Customer not found: {cid}"})
+                phone_hash = self._hash_phone(phone) if phone else None
+                if not phone_hash:
+                    errors.append({"row": row_num, "column": "phone_number", "message": "Empty phone_number"})
+                    skipped += 1
+                    continue
+
+                if phone_hash not in valid_phones:
+                    errors.append({"row": row_num, "column": "phone_number", "message": "Phone number not found in customer_master"})
                     skipped += 1
                     continue
 
@@ -614,32 +633,21 @@ class CSVImportService:
                     continue
 
                 direction = SENDER_TYPE_TO_DIRECTION.get(sender, "inbound")
-                phone_hash = phone_map.get(cid, "unknown")
-                customer_uuid = cid_map[cid]
 
-                # Layer 1: FeedbackRaw
-                msg_uuid = uuid.uuid4()
                 raw = FeedbackRaw(
-                    msg_id=msg_uuid,
+                    msg_id=uuid.uuid4(),
                     phone_number=phone_hash,  # Store hash, not raw
                     direction=direction,
                     text=text if text else None,
                     timestamp=ts,
+                    raw_meta={"message_id": mid, "sender_type": sender},
                 )
                 db.session.add(raw)
-
-                # Layer 2: FeedbackLinked (auto-created since CSV has customer_id)
-                linked = FeedbackLinked(
-                    link_id=uuid.uuid4(),
-                    msg_id=msg_uuid,
-                    customer_id=customer_uuid,
-                    match_confidence=1.0,
-                    match_method="csv_import",
-                    link_status="verified",
-                )
-                db.session.add(linked)
                 imported += 1
 
+            db.session.flush()
+            from app.services.linking_service import LinkingService
+            linking_stats = LinkingService().link_unlinked_messages()
             db.session.commit()
             logger.info(f"Imported {imported} messages, skipped {skipped}")
 
@@ -653,6 +661,21 @@ class CSVImportService:
             "imported": imported,
             "skipped": skipped,
             "duplicates_ignored": duplicates_ignored,
+            "linking": linking_stats,
             "errors": errors[:MAX_ERRORS_REPORTED],
             "import_timestamp": datetime.utcnow().isoformat(),
         }
+
+    @staticmethod
+    def _feedback_raw_customer_id_is_not_null() -> bool:
+        """Detect legacy schema before bulk insert produces a long DB error."""
+        inspector = sa.inspect(db.engine)
+        try:
+            columns = inspector.get_columns("feedback_raw")
+        except Exception:
+            return False
+
+        for column in columns:
+            if column["name"] == "customer_id":
+                return not column.get("nullable", True)
+        return False

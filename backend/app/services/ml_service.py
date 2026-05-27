@@ -16,6 +16,7 @@ import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import numpy as np
+import pandas as pd
 from flask import current_app
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class MLService:
             return
             
         self.model = None
+        self.scaler = None
         # REMOVED: self.vectorizer - model is numeric-only, no text vectorization
         self.feature_metadata = None
         self.shap_explainer = None
@@ -130,8 +132,9 @@ class MLService:
         """
         try:
             self._load_model()
-            # REMOVED: self._load_vectorizer() - model is numeric-only
             self._load_feature_metadata()
+            self._load_scaler()
+            # REMOVED: self._load_vectorizer() - model is numeric-only
             self._load_shap_explainer()
             
             # Validate against registry
@@ -163,6 +166,46 @@ class MLService:
         self.model_hash = self._compute_file_hash(model_path)
         
         logger.info(f"Loaded model from {model_path}, version: {self.model_version}, hash: {self.model_hash}")
+
+    def _load_scaler(self) -> None:
+        """Load preprocessing artifact if present.
+
+        The artifact is currently a SimpleImputer saved as scaler.pkl for
+        compatibility with the notebook and existing artifact naming.
+        """
+        import joblib
+
+        scaler_path = current_app.config.get("SCALER_PATH", "models/scaler.pkl")
+        if not scaler_path or not os.path.exists(scaler_path):
+            logger.warning(f"Scaler/imputer artifact not found: {scaler_path}")
+            self.scaler = None
+            return
+
+        metadata_path = os.path.join(os.path.dirname(scaler_path), "model_metadata.pkl")
+        if os.path.exists(metadata_path):
+            try:
+                metadata = joblib.load(metadata_path)
+                expected_version = metadata.get("model_version")
+                if expected_version and self.model_version and expected_version != self.model_version:
+                    logger.warning(
+                        "Scaler/imputer skipped because metadata version does not match loaded model: "
+                        f"metadata={expected_version}, model={self.model_version}"
+                    )
+                    self.scaler = None
+                    return
+                expected_scaler_hash = (metadata.get("artifact_hashes") or {}).get("scaler")
+                actual_scaler_hash = self._compute_file_hash(scaler_path)
+                if not expected_scaler_hash or expected_scaler_hash != actual_scaler_hash:
+                    logger.warning("Scaler/imputer skipped because artifact metadata is missing or hash does not match")
+                    self.scaler = None
+                    return
+            except Exception as exc:
+                logger.warning(f"Scaler/imputer metadata could not be validated; skipping scaler: {exc}")
+                self.scaler = None
+                return
+
+        self.scaler = joblib.load(scaler_path)
+        logger.info(f"Loaded scaler/imputer from {scaler_path}")
     
     # REMOVED: _load_vectorizer() 
     # Model is numeric-only. Vectorizer was never used.
@@ -186,6 +229,9 @@ class MLService:
         
         with open(meta_path, 'r') as f:
             self.feature_metadata = json.load(f)
+
+        if self.feature_metadata.get("version"):
+            self.model_version = self.feature_metadata["version"]
         
         # VALIDATE metadata has required fields
         if "expected_shape" not in self.feature_metadata:
@@ -221,9 +267,14 @@ class MLService:
             logger.warning(f"SHAP explainer not found: {shap_path}")
             return
         
-        self.shap_explainer = joblib.load(shap_path)
-        self.shap_hash = self._compute_file_hash(shap_path)
-        logger.info(f"Loaded SHAP explainer from {shap_path}, hash: {self.shap_hash}")
+        try:
+            self.shap_explainer = joblib.load(shap_path)
+            self.shap_hash = self._compute_file_hash(shap_path)
+            logger.info(f"Loaded SHAP explainer from {shap_path}, hash: {self.shap_hash}")
+        except Exception as exc:
+            self.shap_explainer = None
+            self.shap_hash = None
+            logger.warning(f"SHAP explainer could not be loaded and will be disabled: {exc}")
     
     def _expected_feature_count(self) -> int:
         """
@@ -270,13 +321,68 @@ class MLService:
         if self.feature_metadata:
             return self.feature_metadata.get("feature_names", [])
         return []
+
+    def prepare_model_features(self, features: List[float]) -> np.ndarray:
+        """Return the exact feature matrix used by the model.
+
+        Some features are retained in the schema for display/audit, but are
+        neutralized for model scoring because they are contextual rather than
+        operational risk drivers.
+        """
+        feature_names = self.get_feature_names()
+        features_array = np.array(features, dtype=float).reshape(1, -1)
+
+        if len(feature_names) != features_array.shape[1]:
+            return features_array
+
+        neutralized = (self.feature_metadata or {}).get("neutralized_model_features", [])
+        for feature in neutralized:
+            if feature in feature_names:
+                features_array[:, feature_names.index(feature)] = 0.0
+
+        if self.scaler is not None:
+            features_df = pd.DataFrame(features_array, columns=feature_names)
+            features_array = self.scaler.transform(features_df)
+
+        return features_array
+
+    def _feature_value(self, features: List[float], feature_name: str, default: float = 0.0) -> float:
+        names = self.get_feature_names()
+        if feature_name not in names:
+            return default
+        try:
+            return float(features[names.index(feature_name)] or 0.0)
+        except Exception:
+            return default
+
+    def _apply_operational_risk_floor(self, score: float, features: List[float]) -> float:
+        """Apply business-calibrated floors for obvious inactivity risk.
+
+        The model score is learned from historical labels. For operational risk
+        scoring, customers with no recent transactions and long recency should
+        not remain low risk just because the model underestimates that pattern.
+        """
+        recency_days = self._feature_value(features, "recency_days")
+        tx_count_90d = self._feature_value(features, "tx_count_90d")
+        spend_90d = self._feature_value(features, "spend_90d")
+
+        floor = 0.0
+        if tx_count_90d <= 0 and spend_90d <= 0:
+            if recency_days >= 180:
+                floor = 0.90
+            elif recency_days >= 120:
+                floor = 0.80
+            elif recency_days >= 90:
+                floor = 0.65
+
+        return max(score, floor)
     
     def predict_for_customer(self, customer_id: str) -> Dict[str, Any]:
         """
         SINGLE TRUST BOUNDARY prediction.
         
         This method:
-        1. Validates identity (verified feedback count > 0)
+        1. Validates identity (trusted feedback count > 0)
         2. Builds features internally via FeatureService (PURE)
         3. Validates schema hash cross-service
         4. Runs prediction with full provenance
@@ -290,7 +396,7 @@ class MLService:
             Dict with prediction and full provenance
             
         Raises:
-            PermissionError: If customer lacks verified identity
+            PermissionError: If customer lacks trusted identity links
             RuntimeError: If model/registry/schema mismatch
         """
         from app.utils.errors import ModelNotLoadedError
@@ -336,6 +442,7 @@ class MLService:
                 "model_hash": self.model_hash,
                 "feature_schema_hash": self.feature_schema_hash,
                 "feature_service_version": feature_data["feature_service_version"],
+                "trusted_feedback_count": feature_data.get("trusted_feedback_count"),
                 "verified_feedback_count": feature_data["verified_feedback_count"],
                 "as_of_date": feature_data["as_of_date"],
                 "predicted_at": datetime.utcnow().isoformat(),
@@ -380,7 +487,7 @@ class MLService:
         Args:
             customer_id: Customer identifier
             features: Pre-validated feature vector from FeatureService
-            verified_count: Pre-validated count of verified feedback
+            verified_count: Pre-validated count of trusted feedback
             
         Returns:
             Dict with prediction and provenance
@@ -427,7 +534,7 @@ class MLService:
             raise ModelNotLoadedError("Model is not loaded. Cannot make predictions.")
         
         # Ensure features is numpy array with correct shape
-        features_array = np.array(features).reshape(1, -1)
+        features_array = np.array(features, dtype=float).reshape(1, -1)
         
         # Validate feature count using SINGLE SOURCE OF TRUTH
         expected_shape = self._expected_feature_count()
@@ -435,6 +542,8 @@ class MLService:
             raise ValueError(
                 f"Feature shape mismatch: expected {expected_shape}, got {features_array.shape[1]}"
             )
+
+        features_array = self.prepare_model_features(features)
         
         # Get probability
         if hasattr(self.model, "predict_proba"):
@@ -442,6 +551,8 @@ class MLService:
             churn_score = float(proba[1]) if len(proba) > 1 else float(proba[0])
         else:
             churn_score = float(self.model.predict(features_array)[0])
+
+        churn_score = self._apply_operational_risk_floor(churn_score, features)
         
         churn_label = self._score_to_label(churn_score)
         
@@ -479,9 +590,11 @@ class MLService:
     
     def _score_to_label(self, score: float) -> str:
         """Convert churn score to label"""
-        if score < 0.3:
+        low_threshold = float(current_app.config.get("RISK_LOW_THRESHOLD", 0.75))
+        high_threshold = float(current_app.config.get("RISK_HIGH_THRESHOLD", 0.95))
+        if score < low_threshold:
             return "low"
-        elif score < 0.7:
+        elif score < high_threshold:
             return "medium"
         else:
             return "high"

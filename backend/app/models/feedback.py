@@ -156,6 +156,13 @@ class FeedbackFeatures(db.Model):
         unique=True,
         index=True
     )
+    msg_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("feedback_raw.msg_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
     customer_id = db.Column(
         UUID(as_uuid=True), 
         db.ForeignKey("customers.customer_id", ondelete="CASCADE"),
@@ -198,6 +205,7 @@ class FeedbackFeatures(db.Model):
         return {
             "feature_id": str(self.feature_id),
             "link_id": str(self.link_id),
+            "msg_id": str(self.msg_id),
             "customer_id": str(self.customer_id),
             "msg_length": self.msg_length,
             "num_exclamations": self.num_exclamations,

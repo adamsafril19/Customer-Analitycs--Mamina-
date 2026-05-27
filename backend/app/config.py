@@ -62,14 +62,19 @@ class Config:
     
     # ML Models
     MODEL_PATH = os.getenv("MODEL_PATH", "models/churn_model.pkl")
+    SCALER_PATH = os.getenv("SCALER_PATH", "models/scaler.pkl")
     VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "models/vectorizer.pkl")
     FEATURE_META_PATH = os.getenv("FEATURE_META_PATH", "models/features.json")
     SHAP_EXPLAINER_PATH = os.getenv("SHAP_EXPLAINER_PATH", "models/shap_explainer.pkl")
     
     # Model Config
     MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
+    RISK_LOW_THRESHOLD = float(os.getenv("RISK_LOW_THRESHOLD", "0.40"))
+    RISK_HIGH_THRESHOLD = float(os.getenv("RISK_HIGH_THRESHOLD", "0.90"))
     ENABLE_SHAP = os.getenv("ENABLE_SHAP", "true").lower() == "true"
     SHAP_BACKGROUND_MODE = os.getenv("SHAP_BACKGROUND_MODE", "true").lower() == "true"
+    TOPIC_MODEL_PATH = os.getenv("TOPIC_MODEL_PATH")
+    NLP_STRICT = os.getenv("NLP_STRICT", "true").lower() == "true"
     
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

@@ -7,8 +7,19 @@ import { usePreviewCSV, useImportCSV } from "../hooks/useImport";
 const TABS = [
   { key: "customers", label: "Customers", icon: Users, color: "primary", description: "Import data pelanggan (customer_master.csv)", requiredCols: ["customer_id", "customer_name", "phone_number", "join_date"] },
   { key: "transactions", label: "Transactions", icon: CreditCard, color: "emerald", description: "Import data transaksi (transactions.csv)", requiredCols: ["transaction_id", "customer_id", "transaction_date", "transaction_amount", "service_type", "transaction_status"] },
-  { key: "messages", label: "WhatsApp", icon: MessageSquare, color: "purple", description: "Import pesan WhatsApp (whatsapp_messages.csv)", requiredCols: ["message_id", "customer_id", "message_timestamp", "sender_type", "message_text"] },
+  { key: "messages", label: "WhatsApp", icon: MessageSquare, color: "purple", description: "Import pesan WhatsApp (whatsapp_messages.csv)", requiredCols: ["message_id", "phone_number", "message_timestamp", "sender_type", "message_text"] },
 ];
+
+function getUploadErrorMessage(err, fallback) {
+  const data = err.response?.data;
+  if (data?.error) return data.error;
+  if (data?.message) return data.message;
+  if (Array.isArray(data?.errors) && data.errors.length > 0) {
+    const first = data.errors[0];
+    return first.message || `${first.column || "CSV"} tidak valid`;
+  }
+  return fallback;
+}
 
 // ─── Main Page ───────────────────────────────────────────────
 export default function DataImport() {
@@ -101,7 +112,7 @@ function ImportSection({ tab }) {
     if (!file) return;
     previewMutation.mutate(file, {
       onSuccess: (data) => { setPreviewData(data); setStep("preview"); },
-      onError: (err) => toast.error(err.response?.data?.error || "Preview gagal"),
+      onError: (err) => toast.error(getUploadErrorMessage(err, "Preview gagal")),
     });
   }, [file, previewMutation]);
 
@@ -114,7 +125,7 @@ function ImportSection({ tab }) {
         if (data.success) toast.success(`${data.imported} baris berhasil diimport!`);
         else toast.error("Import gagal — lihat detail error");
       },
-      onError: (err) => toast.error(err.response?.data?.error || "Import gagal"),
+      onError: (err) => toast.error(getUploadErrorMessage(err, "Import gagal")),
     });
   }, [file, importMutation]);
 
@@ -198,11 +209,58 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
         <StatCard label="Duplikat" value={preview?.summary?.duplicates ?? 0} color={preview?.summary?.duplicates > 0 ? "yellow" : "gray"} />
       </div>
 
+      {/* Enhanced Statistics Report Card */}
+      <div className="bg-gradient-to-br from-pink-50/20 to-purple-50/20 border border-pink-100 rounded-2xl p-5 shadow-sm space-y-4">
+        <h4 className="text-sm font-bold text-stone-700 flex items-center gap-2">
+          <ClipboardList className="w-4 h-4 text-pink-500" />
+          Detail Laporan Validasi & Statistik Data
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
+            <span className="text-xs text-stone-500 font-medium">Integritas Baris Data</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-emerald-600">{validation?.valid_rows ?? 0}</span>
+              <span className="text-xs text-stone-400">Valid</span>
+              <span className="text-2xl font-bold text-rose-500 ml-auto">{validation?.invalid_rows ?? 0}</span>
+              <span className="text-xs text-stone-400">Invalid</span>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-2">Seluruh baris dengan format kolom tidak sesuai atau nilai kosong akan ditandai invalid.</p>
+          </div>
+          
+          <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
+            <span className="text-xs text-stone-500 font-medium">Deteksi Duplikasi Data</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-amber-600">{preview?.summary?.duplicates ?? 0}</span>
+              <span className="text-xs text-stone-400">Baris terdeteksi duplikat</span>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-2">Sistem otomatis mendeteksi dan memperbarui atau melewati record dengan ID yang sama.</p>
+          </div>
+
+          <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
+            <span className="text-xs text-stone-500 font-medium">Timestamp & Sinkronisasi Relasional</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-primary-600">
+                {(preview?.summary?.invalid_fk ?? 0) + (preview?.summary?.invalid_phone_fk ?? 0)}
+              </span>
+              <span className="text-xs text-stone-400">Gagal Relasi</span>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-2">Baris yang tidak memiliki relasi customer valid akan ditolak demi integritas database.</p>
+          </div>
+        </div>
+      </div>
+
       {/* FK errors */}
       {preview?.summary?.invalid_fk > 0 && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <span><strong>{preview.summary.invalid_fk}</strong> baris memiliki customer_id yang tidak ditemukan di database. Import customers terlebih dahulu.</span>
+        </div>
+      )}
+
+      {preview?.summary?.invalid_phone_fk > 0 && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span><strong>{preview.summary.invalid_phone_fk}</strong> baris memiliki phone_number yang belum ada di customer_master. Import customers terlebih dahulu.</span>
         </div>
       )}
 

@@ -13,7 +13,8 @@ celery_app = Celery(
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
     include=[
         "app.tasks.etl_tasks",
-        "app.tasks.prediction_tasks"
+        "app.tasks.prediction_tasks",
+        "app.tasks.pipeline_tasks"
     ]
 )
 
@@ -25,8 +26,8 @@ celery_app.conf.update(
     timezone="Asia/Jakarta",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=300,  # 5 minutes
-    task_soft_time_limit=240,  # 4 minutes (for graceful shutdown)
+    task_time_limit=1800,  # 30 minutes
+    task_soft_time_limit=1740,  # 29 minutes (for graceful shutdown)
     worker_prefetch_multiplier=1,
     task_acks_late=True,
 )

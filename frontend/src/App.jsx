@@ -13,6 +13,8 @@ const ChurnRisk = lazy(() => import("./pages/ChurnRisk"));
 const Actions = lazy(() => import("./pages/Actions"));
 const Settings = lazy(() => import("./pages/Settings"));
 const DataImport = lazy(() => import("./pages/DataImport"));
+const MLPipeline = lazy(() => import("./pages/MLPipeline"));
+const ModelEvaluation = lazy(() => import("./pages/ModelEvaluation"));
 
 function App() {
   return (
@@ -38,6 +40,8 @@ function App() {
           <Route path="actions" element={<Actions />} />
           <Route path="settings" element={<Settings />} />
           <Route path="import" element={<DataImport />} />
+          <Route path="ml-pipeline" element={<MLPipeline />} />
+          <Route path="model-evaluation" element={<ModelEvaluation />} />
         </Route>
 
         {/* Catch all - redirect to dashboard */}

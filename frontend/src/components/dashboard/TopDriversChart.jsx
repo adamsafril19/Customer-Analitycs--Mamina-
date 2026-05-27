@@ -22,7 +22,9 @@ function TopDriversChart({ data }) {
       ...item,
       label: item.description || FEATURE_LABELS[item.feature] || item.feature,
       impact: parseFloat(
-        (Math.abs(item.avg_impact || item.impact || 0) * 100).toFixed(1)
+        (
+          Math.abs(item.avg_contribution ?? item.avg_impact ?? item.impact ?? 0) * 100
+        ).toFixed(1)
       ),
       color: COLORS[index % COLORS.length],
     })) || [];

@@ -257,8 +257,12 @@ def list_actions():
     customer_id = request.args.get("customer_id")
     limit = request.args.get("limit", 20, type=int)
     offset = request.args.get("offset", 0, type=int)
+    page = request.args.get("page", type=int)
     
-    offset, limit = validate_pagination(offset // limit + 1 if offset else 1, limit)
+    if page and page > 0:
+        offset, limit = validate_pagination(page, limit)
+    else:
+        offset, limit = validate_pagination(offset // limit + 1 if offset else 1, limit)
     
     query = Action.query
     
