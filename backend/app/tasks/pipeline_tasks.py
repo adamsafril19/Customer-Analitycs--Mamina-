@@ -186,7 +186,7 @@ def retrain_model_task(self, cutoff_date: str = None, churn_window: int = 90, ob
             env=env,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=1800,
             check=False,
         )
 

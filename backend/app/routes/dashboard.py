@@ -482,12 +482,27 @@ def get_behavioral_insights():
                 "low_avg": round(low_sentiment, 3),
             })
         else:
+            total_semantics = CustomerTextSemantics.query.filter(
+                CustomerTextSemantics.avg_sentiment_score.isnot(None)
+            ).count()
+            if total_semantics == 0:
+                sentiment_message = "Belum ada data sentimen. Jalankan NLP Processing terlebih dahulu."
+            elif not high_cids or not low_cids:
+                sentiment_message = (
+                    "Data sentimen tersedia, tetapi insight membutuhkan hasil Run Risk Scoring "
+                    "dengan pelanggan high-risk dan low-risk untuk dibandingkan."
+                )
+            else:
+                sentiment_message = (
+                    "Data sentimen tersedia, tetapi belum mencakup cukup pelanggan pada grup "
+                    "high-risk dan low-risk terbaru untuk dibandingkan."
+                )
             insights.append({
                 "key": "sentiment_signal",
                 "title": "Sinyal Sentimen",
                 "icon": "AlertTriangle",
                 "color": "rose",
-                "description": "Belum ada data sentimen. Jalankan NLP Processing terlebih dahulu.",
+                "description": sentiment_message,
                 "metric": None,
                 "high_avg": None,
                 "low_avg": None,

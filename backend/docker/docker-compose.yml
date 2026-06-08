@@ -9,7 +9,7 @@ x-backend-env: &backend-env
   REDIS_URL: redis://redis:6379/0
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
-  MODEL_PATH: /app/models/churn_model.pkl
+  MODEL_PATH: /app/models/multimodal_model.pkl
   TOPIC_MODEL_PATH: /app/models/topic_model
   NLP_STRICT: "true"
   HF_HOME: /app/.cache/huggingface

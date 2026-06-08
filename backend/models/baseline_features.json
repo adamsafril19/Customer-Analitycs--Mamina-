@@ -3,8 +3,6 @@
     "recency_ratio",
     "frequency_trend_smoothed",
     "spend_trend_smoothed",
-    "msg_trend_smoothed",
-    "sentiment_trend",
     "recency_days",
     "tx_count_90d",
     "spend_90d",
@@ -15,18 +13,12 @@
     "activity_std",
     "activity_cv",
     "spend_volatility_cv",
-    "trend_magnitude_interaction",
-    "avg_sentiment_score",
-    "complaint_ratio",
-    "msg_volatility",
-    "response_delay_mean"
+    "trend_magnitude_interaction"
   ],
   "feature_descriptions": {
     "recency_ratio": "Rasio recency terhadap baseline personal (recency_days / avg_ipt)",
     "frequency_trend_smoothed": "Slope tren frekuensi transaksi (smoothed, de-noised)",
     "spend_trend_smoothed": "Slope tren belanja (smoothed, de-noised)",
-    "msg_trend_smoothed": "Slope tren komunikasi (smoothed, de-noised)",
-    "sentiment_trend": "Perubahan sentimen (30d - prior_30d)",
     "recency_days": "Hari sejak transaksi terakhir",
     "tx_count_90d": "Jumlah transaksi dalam 90 hari",
     "spend_90d": "Total belanja dalam 90 hari",
@@ -37,17 +29,14 @@
     "activity_std": "Standar deviasi tx count antar window",
     "activity_cv": "Koefisien variasi aktivitas (std/mean, capped, zero-safe)",
     "spend_volatility_cv": "Koefisien variasi belanja antar window",
-    "trend_magnitude_interaction": "frequency_trend_smoothed \u00d7 activity_mean",
-    "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
-    "complaint_ratio": "Rasio pesan komplain 30 hari (0-1)",
-    "msg_volatility": "Volatilitas pola pesan harian (std dev)",
-    "response_delay_mean": "Rata-rata waktu respons admin (detik)"
+    "trend_magnitude_interaction": "frequency_trend_smoothed \u00d7 activity_mean"
   },
-  "expected_shape": 20,
-  "model_type": "multimodal_behavioral_risk",
+  "expected_shape": 14,
+  "model_type": "transaction_only_baseline",
   "neutralized_model_features": [
     "tenure_days"
   ],
   "version": "v20260602_123429",
-  "trained_at": "2026-06-02T12:40:25.505923"
+  "trained_at": "2026-06-02T12:40:25.396873",
+  "research_only": true
 }

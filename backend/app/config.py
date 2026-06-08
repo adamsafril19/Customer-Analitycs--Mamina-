@@ -61,7 +61,7 @@ class Config:
     CELERY_TASK_TIME_LIMIT = 300  # 5 minutes
     
     # ML Models
-    MODEL_PATH = os.getenv("MODEL_PATH", "models/churn_model.pkl")
+    MODEL_PATH = os.getenv("MODEL_PATH", "models/multimodal_model.pkl")
     SCALER_PATH = os.getenv("SCALER_PATH", "models/scaler.pkl")
     VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "models/vectorizer.pkl")
     FEATURE_META_PATH = os.getenv("FEATURE_META_PATH", "models/features.json")

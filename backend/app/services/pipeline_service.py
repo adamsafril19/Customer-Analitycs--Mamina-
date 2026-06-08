@@ -70,16 +70,22 @@ class PipelineService:
 
         # Scoring section — depends on ML model which may not be loaded
         try:
+            risk_distribution = ModelEvaluationService().get_risk_distribution()
+            scored_customers = sum(int(value or 0) for value in risk_distribution.values())
             scoring_data = {
                 "status": "completed" if latest_prediction else "pending",
                 "last_processed_at": latest_prediction.created_at.isoformat()
                 if latest_prediction and latest_prediction.created_at else None,
-                "risk_distribution": ModelEvaluationService().get_risk_distribution(),
+                "processed": scored_customers,
+                "failed": 0,
+                "risk_distribution": risk_distribution,
             }
         except Exception:
             scoring_data = {
                 "status": "unavailable",
                 "last_processed_at": None,
+                "processed": 0,
+                "failed": 0,
                 "risk_distribution": {"low": 0, "medium": 0, "high": 0},
                 "error": "Model scoring belum tersedia",
             }
@@ -433,6 +439,7 @@ class ModelEvaluationService:
     def get_evaluation(self) -> Dict[str, Any]:
         latest = self._latest_model_version()
         metrics = (latest.metrics if latest else None) or {}
+        comparison = self._baseline_comparison(metrics)
         technical = {
             "roc_auc": metrics.get("roc_auc"),
             "pr_auc": metrics.get("pr_auc"),
@@ -446,6 +453,11 @@ class ModelEvaluationService:
             "overview": self.get_model_overview(),
             "business_summary": self._business_summary(technical) if available else None,
             "technical_metrics": technical if available else None,
+            "baseline_comparison": comparison,
+            "comparison_interpretation": metrics.get("comparison_interpretation") or (
+                self._comparison_interpretation(comparison) if comparison else None
+            ),
+            "model_metadata": metrics.get("model_metadata"),
             "metrics_available": available,
             "empty_message": None if available else "Belum tersedia. Jalankan Retrain Model terlebih dahulu.",
         }
@@ -523,6 +535,64 @@ class ModelEvaluationService:
             "risk_detection": "Model memiliki metrik evaluasi untuk mendukung deteksi pelanggan berisiko.",
             "usage_note": "Gunakan risk score untuk prioritisasi pelanggan, bukan keputusan otomatis.",
         }
+
+    def _baseline_comparison(self, metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        baseline = metrics.get("baseline")
+        multimodal = metrics.get("multimodal")
+        improvement = metrics.get("improvement")
+        if not baseline or not multimodal:
+            return None
+
+        metric_map = [
+            ("roc_auc", "ROC-AUC"),
+            ("pr_auc", "PR-AUC"),
+            ("precision", "Precision"),
+            ("recall", "Recall"),
+            ("f1", "F1"),
+        ]
+        rows = []
+        for key, label in metric_map:
+            baseline_value = baseline.get(key)
+            multimodal_value = multimodal.get(key)
+            gain = (
+                improvement.get(key)
+                if isinstance(improvement, dict) and key in improvement
+                else (
+                    round(float(multimodal_value or 0) - float(baseline_value or 0), 4)
+                    if baseline_value is not None and multimodal_value is not None
+                    else None
+                )
+            )
+            rows.append({
+                "metric": key,
+                "label": label,
+                "baseline": baseline_value,
+                "multimodal": multimodal_value,
+                "improvement": gain,
+            })
+
+        return {
+            "baseline": baseline,
+            "multimodal": multimodal,
+            "improvement": improvement,
+            "rows": rows,
+        }
+
+    def _comparison_interpretation(self, comparison: Dict[str, Any]) -> str:
+        gains = comparison.get("improvement") or {}
+        roc_gain = float(gains.get("roc_auc", 0) or 0)
+        f1_gain = float(gains.get("f1", 0) or 0)
+        if roc_gain > 0 or f1_gain > 0:
+            conclusion = "customer interaction signals contribute additional predictive value beyond transactional behavior."
+        elif roc_gain == 0 and f1_gain == 0:
+            conclusion = "customer interaction signals show no measurable incremental value in the current validation split."
+        else:
+            conclusion = "customer interaction signals reduce validation performance in the current split and should be reviewed for leakage, noise, or sample-size effects."
+        return (
+            f"Multimodal model changes ROC-AUC by {roc_gain:.3f} and "
+            f"F1-Score by {f1_gain:.3f} compared to the transaction-only baseline. "
+            f"This indicates that {conclusion}"
+        )
 
     def _importance_from_model(self) -> List[Dict[str, Any]]:
         try:

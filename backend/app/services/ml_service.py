@@ -153,7 +153,7 @@ class MLService:
         """Load main prediction model with identity tracking"""
         import joblib
         
-        model_path = current_app.config.get("MODEL_PATH", "models/churn_model.pkl")
+        model_path = current_app.config.get("MODEL_PATH", "models/multimodal_model.pkl")
         
         if not os.path.exists(model_path):
             logger.warning(f"Model file not found: {model_path}")
@@ -247,10 +247,21 @@ class MLService:
         
         logger.info(f"Loaded feature metadata from {meta_path}")
         
-        # Compute feature schema hash from FULL metadata (not just names!)
-        # This catches: order changes, type changes, scaling changes
-        schema_str = json.dumps(self.feature_metadata, sort_keys=True)
-        self.feature_schema_hash = hashlib.sha256(schema_str.encode()).hexdigest()[:16]
+        # Use the stable FeatureService schema hash when the loaded metadata
+        # matches the current production schema. Hashing the full metadata file
+        # would include trained_at/model_version and break inference validation
+        # after every legitimate retrain.
+        try:
+            from app.services.feature_service import FeatureService
+
+            if self.feature_metadata.get("feature_names") == FeatureService.get_feature_names():
+                self.feature_schema_hash = FeatureService.get_feature_schema_hash()
+            else:
+                schema_str = json.dumps(self.feature_metadata.get("feature_names", []), sort_keys=True)
+                self.feature_schema_hash = hashlib.sha256(schema_str.encode()).hexdigest()[:16]
+        except Exception:
+            schema_str = json.dumps(self.feature_metadata.get("feature_names", []), sort_keys=True)
+            self.feature_schema_hash = hashlib.sha256(schema_str.encode()).hexdigest()[:16]
         logger.info(f"Feature schema hash: {self.feature_schema_hash}")
     
     def _load_shap_explainer(self) -> None:

@@ -93,6 +93,9 @@ export default function MLPipeline() {
   const nlpResult = taskQueries.nlp.data?.result;
   const nlpProcessed = nlpResult?.processed ?? nlpData.processed_messages;
   const nlpFailed = nlpResult?.failed ?? nlpData.failed_messages ?? 0;
+  const scoringResult = taskQueries.scoring.data?.result;
+  const scoringProcessed = scoringResult?.processed ?? scoringData.processed ?? 0;
+  const scoringFailed = scoringResult?.failed ?? scoringData.failed ?? 0;
 
   return (
     <div className="space-y-6">
@@ -228,8 +231,8 @@ export default function MLPipeline() {
         }
       >
         <div className="grid gap-3 sm:grid-cols-4">
-          <Metric label="Berhasil" value={formatNumber(taskQueries.scoring.data?.result?.processed)} />
-          <Metric label="Gagal" value={formatNumber(taskQueries.scoring.data?.result?.failed)} />
+          <Metric label="Berhasil" value={formatNumber(scoringProcessed)} />
+          <Metric label="Gagal" value={formatNumber(scoringFailed)} />
           <Metric label="Low Risk" value={formatNumber(scoringData.risk_distribution?.low)} />
           <Metric label="High Risk" value={formatNumber(scoringData.risk_distribution?.high)} />
         </div>

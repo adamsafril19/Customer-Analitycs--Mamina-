@@ -19,7 +19,7 @@ import logging
 import os
 import sys
 from datetime import datetime, date, timedelta
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -49,9 +49,10 @@ DEFAULT_CHURN_WINDOW_DAYS = 90
 DEFAULT_OBSERVATION_WINDOW_DAYS = 90
 NEUTRALIZED_MODEL_FEATURES = ["tenure_days"]
 
-# Feature configuration (20 features: v3.0.0 schema)
-# Must match FeatureService.FEATURE_SCHEMA exactly
-FEATURE_NAMES = [
+# Feature configuration (20 features: v3.0.0 schema).
+# MULTIMODAL_FEATURE_NAMES must match FeatureService.FEATURE_SCHEMA exactly
+# because it is the production inference schema.
+MULTIMODAL_FEATURE_NAMES = [
     # === TREND (smoothed, de-noised) ===
     "recency_ratio",
     "frequency_trend_smoothed",
@@ -79,6 +80,20 @@ FEATURE_NAMES = [
     "msg_volatility",
     "response_delay_mean",
 ]
+
+BASELINE_FEATURE_NAMES = [
+    name for name in MULTIMODAL_FEATURE_NAMES
+    if name not in {
+        "avg_sentiment_score",
+        "complaint_ratio",
+        "msg_volatility",
+        "response_delay_mean",
+        "sentiment_trend",
+        "msg_trend_smoothed",
+    }
+]
+
+FEATURE_NAMES = MULTIMODAL_FEATURE_NAMES
 
 FEATURE_DESCRIPTIONS = {
     # Trend
@@ -249,13 +264,23 @@ def prepare_dataset(
     return df
 
 
-def train_model(df: pd.DataFrame, test_size: float = 0.2) -> Tuple[xgb.XGBClassifier, SimpleImputer, Dict[str, Any], np.ndarray]:
-    """Train XGBoost model"""
+def train_model(
+    df: pd.DataFrame,
+    test_size: float = 0.2,
+    feature_names: Optional[List[str]] = None,
+    model_label: str = "multimodal",
+) -> Tuple[xgb.XGBClassifier, SimpleImputer, Dict[str, Any], np.ndarray]:
+    """Train XGBoost model for a specific feature set."""
     if len(df) < 10:
         raise ValueError("Not enough training data")
 
+    feature_names = feature_names or MULTIMODAL_FEATURE_NAMES
     df = df.sort_values(["observation_date", "customer_id"]).reset_index(drop=True)
-    X = df[FEATURE_NAMES].copy()
+    missing_features = [name for name in feature_names if name not in df.columns]
+    if missing_features:
+        raise ValueError(f"Training dataset missing features for {model_label}: {missing_features}")
+
+    X = df[feature_names].copy()
     for feature in NEUTRALIZED_MODEL_FEATURES:
         if feature in X.columns:
             X[feature] = 0.0
@@ -272,8 +297,8 @@ def train_model(df: pd.DataFrame, test_size: float = 0.2) -> Tuple[xgb.XGBClassi
     y_test = y.iloc[cutoff_idx:].copy()
 
     imputer = SimpleImputer(strategy="median")
-    X_train = pd.DataFrame(imputer.fit_transform(X_train), columns=FEATURE_NAMES)
-    X_test = pd.DataFrame(imputer.transform(X_test), columns=FEATURE_NAMES)
+    X_train = pd.DataFrame(imputer.fit_transform(X_train), columns=feature_names)
+    X_test = pd.DataFrame(imputer.transform(X_test), columns=feature_names)
 
     original_train_size = len(X_train)
     original_positive = int(y_train.sum())
@@ -288,7 +313,7 @@ def train_model(df: pd.DataFrame, test_size: float = 0.2) -> Tuple[xgb.XGBClassi
             k_neighbors = min(5, original_positive - 1)
             smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
             X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
-            X_train = pd.DataFrame(X_train_resampled, columns=FEATURE_NAMES)
+            X_train = pd.DataFrame(X_train_resampled, columns=feature_names)
             y_train = pd.Series(y_train_resampled)
             smote_applied = True
             logger.info("Applied SMOTE: train samples %s -> %s", original_train_size, len(X_train))
@@ -300,7 +325,8 @@ def train_model(df: pd.DataFrame, test_size: float = 0.2) -> Tuple[xgb.XGBClassi
     scale_pos_weight = neg_after / max(pos_after, 1)
 
     logger.info(
-        "Time-based split: train=%s, test=%s, split_observation_date=%s",
+        "Time-based split (%s): train=%s, test=%s, split_observation_date=%s",
+        model_label,
         len(X_train),
         len(X_test),
         split_observation_date,
@@ -354,9 +380,12 @@ def train_model(df: pd.DataFrame, test_size: float = 0.2) -> Tuple[xgb.XGBClassi
         "observation_dates": sorted({d.isoformat() for d in df["observation_date"]}),
         "threshold_sensitivity": threshold_sensitivity,
         "neutralized_model_features": NEUTRALIZED_MODEL_FEATURES,
+        "model_type": model_label,
+        "feature_count": len(feature_names),
+        "feature_names": feature_names,
     }
     
-    logger.info(f"Metrics: {metrics}")
+    logger.info("%s metrics: %s", model_label, metrics)
     return model, imputer, metrics, X_train.values
 
 
@@ -414,12 +443,12 @@ def create_shap_explainer(model: xgb.XGBClassifier, X_sample: np.ndarray):
 
 
 def save_artifacts(model, imputer, metrics, shap_explainer, version, output_dir="models"):
-    """Save model artifacts"""
+    """Save production multimodal model artifacts."""
     os.makedirs(output_dir, exist_ok=True)
     paths = {}
     
-    # Model
-    model_path = os.path.join(output_dir, "churn_model.pkl")
+    # Production model: multimodal only.
+    model_path = os.path.join(output_dir, "multimodal_model.pkl")
     joblib.dump(model, model_path)
     paths["model"] = model_path
 
@@ -431,10 +460,10 @@ def save_artifacts(model, imputer, metrics, shap_explainer, version, output_dir=
     
     # Feature metadata
     feature_meta = {
-        "feature_names": FEATURE_NAMES,
+        "feature_names": MULTIMODAL_FEATURE_NAMES,
         "feature_descriptions": FEATURE_DESCRIPTIONS,
-        "expected_shape": len(FEATURE_NAMES),
-        "model_type": "ontology_refactored",
+        "expected_shape": len(MULTIMODAL_FEATURE_NAMES),
+        "model_type": "multimodal_behavioral_risk",
         "neutralized_model_features": NEUTRALIZED_MODEL_FEATURES,
         "version": version,
         "trained_at": datetime.utcnow().isoformat()
@@ -464,7 +493,7 @@ def save_artifacts(model, imputer, metrics, shap_explainer, version, output_dir=
         "model_version": version,
         "feature_schema_version": FeatureService.FEATURE_SCHEMA_VERSION,
         "feature_schema_hash": FeatureService.get_feature_schema_hash(),
-        "expected_feature_count": len(FEATURE_NAMES),
+        "expected_feature_count": len(MULTIMODAL_FEATURE_NAMES),
         "metrics": metrics,
         "shap_available": shap_available,
         "explanation_status": "available" if shap_available else "unavailable",
@@ -490,6 +519,140 @@ def save_artifacts(model, imputer, metrics, shap_explainer, version, output_dir=
     return paths
 
 
+def save_baseline_artifacts(model, imputer, metrics, version, output_dir="models"):
+    """Save research-only baseline artifacts."""
+    os.makedirs(output_dir, exist_ok=True)
+    paths = {}
+
+    model_path = os.path.join(output_dir, "baseline_model.pkl")
+    joblib.dump(model, model_path)
+    paths["model"] = model_path
+
+    scaler_path = os.path.join(output_dir, "baseline_scaler.pkl")
+    joblib.dump(imputer, scaler_path)
+    paths["scaler"] = scaler_path
+
+    feature_meta = {
+        "feature_names": BASELINE_FEATURE_NAMES,
+        "feature_descriptions": {
+            name: FEATURE_DESCRIPTIONS.get(name, name)
+            for name in BASELINE_FEATURE_NAMES
+        },
+        "expected_shape": len(BASELINE_FEATURE_NAMES),
+        "model_type": "transaction_only_baseline",
+        "neutralized_model_features": [
+            name for name in NEUTRALIZED_MODEL_FEATURES
+            if name in BASELINE_FEATURE_NAMES
+        ],
+        "version": version,
+        "trained_at": datetime.utcnow().isoformat(),
+        "research_only": True,
+    }
+
+    meta_path = os.path.join(output_dir, "baseline_features.json")
+    with open(meta_path, "w") as f:
+        json.dump(feature_meta, f, indent=2)
+    paths["features"] = meta_path
+
+    baseline_metadata = {
+        "model_hash": _compute_file_hash(model_path),
+        "model_version": version,
+        "feature_schema_version": FeatureService.FEATURE_SCHEMA_VERSION,
+        "feature_schema_hash": hashlib.sha256(
+            json.dumps(feature_meta, sort_keys=True).encode()
+        ).hexdigest()[:16],
+        "expected_feature_count": len(BASELINE_FEATURE_NAMES),
+        "metrics": metrics,
+        "artifact_paths": {
+            "model": model_path,
+            "features": meta_path,
+            "scaler": scaler_path,
+        },
+        "artifact_hashes": {
+            "model": _compute_file_hash(model_path),
+            "features": _compute_file_hash(meta_path),
+            "scaler": _compute_file_hash(scaler_path),
+        },
+        "trained_at": datetime.utcnow().isoformat(),
+        "research_only": True,
+    }
+    metadata_path = os.path.join(output_dir, "baseline_model_metadata.pkl")
+    joblib.dump(baseline_metadata, metadata_path)
+    paths["metadata"] = metadata_path
+
+    return paths
+
+
+def compute_incremental_improvement(
+    baseline_metrics: Dict[str, Any],
+    multimodal_metrics: Dict[str, Any],
+) -> Dict[str, float]:
+    """Compute multimodal minus baseline gains for thesis validation."""
+    keys = ["roc_auc", "pr_auc", "precision", "recall", "f1"]
+    return {
+        key: round(float(multimodal_metrics.get(key, 0) or 0) - float(baseline_metrics.get(key, 0) or 0), 4)
+        for key in keys
+    }
+
+
+def build_research_metrics(
+    baseline_metrics: Dict[str, Any],
+    multimodal_metrics: Dict[str, Any],
+    improvement: Dict[str, float],
+    baseline_paths: Dict[str, str],
+    multimodal_paths: Dict[str, str],
+    version: str,
+) -> Dict[str, Any]:
+    """Store comparison data while preserving legacy top-level metrics."""
+    trained_at = datetime.utcnow().isoformat()
+    baseline_metadata = {
+        "feature_count": len(BASELINE_FEATURE_NAMES),
+        "training_samples": baseline_metrics.get("train_size"),
+        "training_date": trained_at,
+        "model_version": version,
+        "model_path": baseline_paths.get("model"),
+        "model_hash": _compute_file_hash(baseline_paths.get("model")),
+        "research_only": True,
+    }
+    multimodal_metadata = {
+        "feature_count": len(MULTIMODAL_FEATURE_NAMES),
+        "training_samples": multimodal_metrics.get("train_size"),
+        "training_date": trained_at,
+        "model_version": version,
+        "model_path": multimodal_paths.get("model"),
+        "model_hash": _compute_file_hash(multimodal_paths.get("model")),
+        "production_model": True,
+    }
+
+    return {
+        **multimodal_metrics,
+        "baseline": baseline_metrics,
+        "multimodal": multimodal_metrics,
+        "improvement": improvement,
+        "model_metadata": {
+            "baseline": baseline_metadata,
+            "multimodal": multimodal_metadata,
+        },
+        "comparison_interpretation": build_comparison_interpretation(improvement),
+    }
+
+
+def build_comparison_interpretation(improvement: Dict[str, float]) -> str:
+    roc_gain = improvement.get("roc_auc", 0) or 0
+    f1_gain = improvement.get("f1", 0) or 0
+    direction = "improves" if roc_gain >= 0 and f1_gain >= 0 else "changes"
+    value_note = (
+        "customer interaction signals contribute additional predictive value beyond transactional behavior."
+        if roc_gain > 0 or f1_gain > 0
+        else "customer interaction signals did not improve these validation metrics in the current split."
+    )
+    return (
+        f"Multimodal model {direction} ROC-AUC by {roc_gain:.3f} and "
+        f"F1-Score by {f1_gain:.3f} compared to the transaction-only baseline. "
+        f"This indicates that {value_note}"
+    )
+
+
 def register_model_version(version, model_path, metrics):
     """Register in model_versions table"""
     existing = ModelVersion.query.filter_by(model_version=version).first()
@@ -510,6 +673,53 @@ def register_model_version(version, model_path, metrics):
     db.session.add(mv)
     db.session.commit()
     return mv
+
+
+def register_active_multimodal_model(version, model_path, paths, metrics):
+    """Register only the multimodal artifact as active production model."""
+    try:
+        from app.models.ml_registry import MLModelRegistry
+
+        model_hash = _compute_file_hash(model_path)
+        feature_hash = FeatureService.get_feature_schema_hash()
+        shap_hash = _compute_file_hash(paths.get("shap")) if paths.get("shap") else None
+        MLModelRegistry.query.filter_by(is_active=True).update({"is_active": False})
+
+        existing = MLModelRegistry.query.filter_by(model_hash=model_hash).first()
+        if existing:
+            registry = existing
+            registry.is_active = True
+            registry.model_version = version
+            registry.model_name = "multimodal_behavioral_risk"
+            registry.feature_schema_hash = feature_hash
+            registry.feature_names = MULTIMODAL_FEATURE_NAMES
+            registry.expected_feature_count = len(MULTIMODAL_FEATURE_NAMES)
+            registry.training_data_count = metrics.get("train_size")
+            registry.training_date = datetime.utcnow()
+            registry.shap_explainer_hash = shap_hash
+            registry.notes = "Production multimodal model. Baseline model is research-only."
+        else:
+            registry = MLModelRegistry(
+                model_name="multimodal_behavioral_risk",
+                model_version=version,
+                model_hash=model_hash,
+                feature_schema_hash=feature_hash,
+                feature_names=MULTIMODAL_FEATURE_NAMES,
+                expected_feature_count=len(MULTIMODAL_FEATURE_NAMES),
+                training_data_count=metrics.get("train_size"),
+                training_date=datetime.utcnow(),
+                shap_explainer_hash=shap_hash,
+                is_active=True,
+                notes="Production multimodal model. Baseline model is research-only.",
+            )
+            db.session.add(registry)
+
+        db.session.commit()
+        return registry
+    except Exception as exc:
+        db.session.rollback()
+        logger.warning("Could not update ML model registry: %s", exc)
+        return None
 
 
 def main():
@@ -544,10 +754,43 @@ def main():
             logger.error("Insufficient data")
             sys.exit(1)
         
-        model, imputer, metrics, shap_sample = train_model(df)
-        shap_explainer = create_shap_explainer(model, shap_sample)
-        paths = save_artifacts(model, imputer, metrics, shap_explainer, version, args.output_dir)
-        register_model_version(version, paths["model"], metrics)
+        baseline_model, baseline_imputer, baseline_metrics, _ = train_model(
+            df,
+            feature_names=BASELINE_FEATURE_NAMES,
+            model_label="baseline",
+        )
+        multimodal_model, multimodal_imputer, multimodal_metrics, shap_sample = train_model(
+            df,
+            feature_names=MULTIMODAL_FEATURE_NAMES,
+            model_label="multimodal",
+        )
+        shap_explainer = create_shap_explainer(multimodal_model, shap_sample)
+        baseline_paths = save_baseline_artifacts(
+            baseline_model,
+            baseline_imputer,
+            baseline_metrics,
+            version,
+            args.output_dir,
+        )
+        multimodal_paths = save_artifacts(
+            multimodal_model,
+            multimodal_imputer,
+            multimodal_metrics,
+            shap_explainer,
+            version,
+            args.output_dir,
+        )
+        improvement = compute_incremental_improvement(baseline_metrics, multimodal_metrics)
+        metrics = build_research_metrics(
+            baseline_metrics,
+            multimodal_metrics,
+            improvement,
+            baseline_paths,
+            multimodal_paths,
+            version,
+        )
+        register_model_version(version, multimodal_paths["model"], metrics)
+        register_active_multimodal_model(version, multimodal_paths["model"], multimodal_paths, multimodal_metrics)
         
         logger.info(f"Training complete! Version: {version}")
 

@@ -544,6 +544,7 @@ erDiagram
         boolean is_active
         boolean is_provisional
         datetime created_at
+        datetime last_seen_at
     }
 
     TRANSACTIONS {
@@ -553,6 +554,7 @@ erDiagram
         string service_type
         string status
         datetime tx_date
+        datetime created_at
     }
 
     FEEDBACK_RAW {
@@ -577,11 +579,16 @@ erDiagram
         uuid feature_id PK
         uuid link_id FK
         uuid msg_id FK
-        boolean has_complaint
+        uuid customer_id FK
         integer msg_length
-        float response_time_secs
-        string sentiment_label
+        integer num_exclamations
+        integer num_questions
+        boolean has_complaint
+        boolean has_refund_request
+        float language_confidence
+        integer response_time_secs
         vector embedding
+        string embedding_model_version
         datetime processed_at
     }
 
@@ -612,14 +619,24 @@ erDiagram
         float complaint_rate_30d
         float response_delay_mean
         vector avg_embedding
+        integer embedding_count_30d
+        datetime created_at
     }
 
     CUSTOMER_TEXT_SEMANTICS {
         uuid id PK
         uuid customer_id FK
         date as_of_date
+        jsonb top_topic_counts
+        float avg_topic_similarity
+        string topic_model_version
+        jsonb sentiment_dist
         float avg_sentiment_score
-        string dominant_topic
+        string sentiment_model_version
+        jsonb top_keywords
+        jsonb top_complaint_types
+        jsonb last_n_msg_ids
+        datetime created_at
     }
 
     CHURN_PREDICTIONS {
@@ -628,10 +645,12 @@ erDiagram
         float churn_score
         string churn_label
         string model_version
-        string model_hash
-        string feature_schema_hash
         date as_of_date
+        datetime created_at
         json features_used
+        datetime feature_as_of
+        string feature_schema_hash
+        string model_hash
     }
 
     ML_MODEL_REGISTRY {

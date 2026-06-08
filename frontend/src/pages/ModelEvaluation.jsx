@@ -53,6 +53,13 @@ function formatMetric(value) {
   return value === null || value === undefined ? "-" : Number(value).toFixed(3);
 }
 
+function formatGain(value) {
+  if (value === null || value === undefined) return "-";
+  const numberValue = Number(value);
+  const sign = numberValue > 0 ? "+" : "";
+  return `${sign}${numberValue.toFixed(3)}`;
+}
+
 export default function ModelEvaluation() {
   const evaluation = useModelEvaluation();
   const importance = useFeatureImportance();
@@ -84,6 +91,8 @@ export default function ModelEvaluation() {
   const overview = data.overview || {};
   const summary = data.business_summary;
   const metrics = data.technical_metrics;
+  const comparisonRows = data.baseline_comparison?.rows || [];
+  const modelMetadata = data.model_metadata || {};
   const thresholdRows = threshold.data?.rows || [];
   const importanceRows = importance.data?.features || [];
   const riskCounts = distribution.data?.distribution || {};
@@ -206,6 +215,73 @@ export default function ModelEvaluation() {
               icon="-" 
               title="Ringkasan bisnis belum tersedia" 
               description={data.empty_message || "Jalankan proses pelatihan ulang model (Retrain Model) terlebih dahulu untuk memunculkan ringkasan bisnis."} 
+            />
+          )}
+        </div>
+      </div>
+
+      {/* SECTION 3: BASELINE VS MULTIMODAL COMPARISON */}
+      <div className="bg-white rounded-2xl border border-primary-100 shadow-sm overflow-hidden">
+        <div className="border-b border-primary-50 bg-stone-50/55 p-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-indigo-100 text-indigo-700">
+              <ArrowRightLeft className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-primary-900">Baseline vs Multimodal Comparison</h2>
+              <p className="text-xs text-stone-500 mt-0.5">Validasi H2: dampak penambahan sinyal interaksi WhatsApp/NLP terhadap baseline transaksi.</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 space-y-6">
+          {comparisonRows.length ? (
+            <>
+              <div className="overflow-hidden rounded-xl border border-stone-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm divide-y divide-stone-200">
+                    <thead className="bg-stone-50 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                      <tr>
+                        <th className="px-6 py-4">Metric</th>
+                        <th className="px-6 py-4">Baseline</th>
+                        <th className="px-6 py-4">Multimodal</th>
+                        <th className="px-6 py-4">Improvement</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white">
+                      {comparisonRows.map((row) => (
+                        <tr key={row.metric} className="hover:bg-primary-50/30 transition-all">
+                          <td className="px-6 py-4 font-semibold text-stone-800">{row.label}</td>
+                          <td className="px-6 py-4 font-mono text-stone-700">{formatMetric(row.baseline)}</td>
+                          <td className="px-6 py-4 font-mono font-bold text-primary-900">{formatMetric(row.multimodal)}</td>
+                          <td className={`px-6 py-4 font-mono font-bold ${Number(row.improvement || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                            {formatGain(row.improvement)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-5">
+                <div className="flex items-start gap-3">
+                  <Info className="h-5 w-5 text-indigo-700 shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium leading-relaxed text-indigo-950">
+                    {data.comparison_interpretation}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <ModelMetadataPanel title="Baseline" metadata={modelMetadata.baseline} />
+                <ModelMetadataPanel title="Multimodal" metadata={modelMetadata.multimodal} />
+              </div>
+            </>
+          ) : (
+            <EmptyState 
+              icon="-" 
+              title="Perbandingan baseline belum tersedia" 
+              description="Jalankan Retrain Model untuk melatih baseline transaksi dan model multimodal secara bersamaan." 
             />
           )}
         </div>
@@ -469,6 +545,36 @@ function SummaryItem({ icon, label, value, bgColor }) {
         <span className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">{label}</span>
         <p className="mt-1 text-sm font-medium leading-relaxed text-stone-800">{value}</p>
       </div>
+    </div>
+  );
+}
+
+function ModelMetadataPanel({ title, metadata }) {
+  const rows = [
+    ["Feature Count", metadata?.feature_count],
+    ["Training Samples", metadata?.training_samples?.toLocaleString("id-ID")],
+    ["Training Date", metadata?.training_date],
+    ["Model Version", metadata?.model_version],
+  ];
+
+  return (
+    <div className="rounded-xl border border-stone-200 bg-white p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-extrabold text-primary-900">{title}</h3>
+        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+          metadata?.production_model ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-stone-100 text-stone-600 border border-stone-200"
+        }`}>
+          {metadata?.production_model ? "Production" : "Research Only"}
+        </span>
+      </div>
+      <dl className="space-y-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-start justify-between gap-4 text-sm">
+            <dt className="text-stone-500">{label}</dt>
+            <dd className="max-w-[65%] break-words text-right font-semibold text-stone-800">{value ?? "-"}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
