@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Eye, Phone, MapPin } from "lucide-react";
+import { Eye, Phone } from "lucide-react";
 import ChurnScoreBadge from "./ChurnScoreBadge";
 import RiskLevelBadge from "./RiskLevelBadge";
 import { formatRelativeTime, getInitials, maskPhone } from "../../lib/utils";
@@ -40,11 +40,7 @@ function CustomerCard({ customer }) {
         <ChurnScoreBadge score={customer.risk_score} showLabel={false} />
       </div>
 
-      <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-1 text-stone-500">
-          <MapPin className="h-3 w-3" />
-          <span>{customer.city || "-"}</span>
-        </div>
+      <div className="flex items-center justify-end text-sm">
         <span className="text-stone-500">
           Kunjungan: {formatRelativeTime(customer.last_visit)}
         </span>

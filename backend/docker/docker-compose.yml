@@ -15,6 +15,7 @@ x-backend-env: &backend-env
   HF_HOME: /app/.cache/huggingface
   TRANSFORMERS_CACHE: /app/.cache/huggingface/transformers
   SENTENCE_TRANSFORMERS_HOME: /app/.cache/huggingface/sentence_transformers
+  ENABLE_SHAP: "true"
 
 services:
   # Flask API
@@ -29,7 +30,6 @@ services:
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-here}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-jwt-secret-here}
       MODEL_VERSION: v1.0.0
-      ENABLE_SHAP: "true"
     volumes:
       - ../models:/app/models:ro
       - ../logs:/app/logs
@@ -53,7 +53,7 @@ services:
   celery-worker:
     build: *backend-build
     container_name: mamina-celery-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=1
     environment: *backend-env
     volumes:
       - ../models:/app/models
@@ -67,6 +67,12 @@ services:
     restart: unless-stopped
     networks:
       - mamina-network
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.tasks.celery_app", "inspect", "ping", "--timeout=10"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
 
   # Celery Beat (Scheduler)
   celery-beat:

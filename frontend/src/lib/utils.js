@@ -151,6 +151,7 @@ export const FEATURE_LABELS = {
   complaint_ratio: "Rasio Komplain",
   msg_volatility: "Volatilitas Pesan",
   response_delay_mean: "Waktu Respon Admin",
+  has_communication_90d: "Memiliki Komunikasi 90 Hari",
 };
 
 /**
@@ -352,6 +353,7 @@ export const ACTION_TYPE_LABELS = {
   promo: "Promo/Diskon",
   visit: "Kunjungan",
   email: "Email",
+  review: "Review Internal",
 };
 
 /**

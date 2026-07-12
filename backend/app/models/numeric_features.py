@@ -55,6 +55,14 @@ class CustomerNumericFeatures(db.Model):
     
     # Tenure
     tenure_days = db.Column(db.Integer, nullable=True, default=0)
+
+    # Transaction channel and quality
+    homecare_tx_ratio_90d = db.Column(db.Float, nullable=True, default=0.0)
+    last_tx_is_homecare = db.Column(db.Float, nullable=True, default=0.0)
+    zero_amount_tx_count_90d = db.Column(db.Integer, nullable=True, default=0)
+
+    # Lifetime value
+    lifetime_tx_count = db.Column(db.Integer, nullable=True, default=0)
     
     # =========================================================================
     # DERIVED RFM SCORES (Dashboard uses these)
@@ -90,6 +98,10 @@ class CustomerNumericFeatures(db.Model):
             "spend_90d": self.spend_90d,
             "avg_tx_value": self.avg_tx_value,
             "tenure_days": self.tenure_days,
+            "homecare_tx_ratio_90d": self.homecare_tx_ratio_90d,
+            "last_tx_is_homecare": self.last_tx_is_homecare,
+            "zero_amount_tx_count_90d": self.zero_amount_tx_count_90d,
+            "lifetime_tx_count": self.lifetime_tx_count,
             # Derived RFM
             "r_score": self.r_score,
             "f_score": self.f_score,

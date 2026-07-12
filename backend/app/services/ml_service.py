@@ -13,6 +13,7 @@ import os
 import json
 import hashlib
 import logging
+import time
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import numpy as np
@@ -57,8 +58,29 @@ class MLService:
         self.model_hash = None
         self.feature_schema_hash = None
         self.shap_hash = None
+        self._registry_checked_at = 0.0
         
         self._initialized = True
+
+    def _refresh_from_registry_if_needed(self) -> None:
+        """Reload artifacts when another process promotes a new active model."""
+        now = time.monotonic()
+        if now - self._registry_checked_at < 30:
+            return
+        self._registry_checked_at = now
+        try:
+            from app.models.ml_registry import MLModelRegistry
+
+            active = MLModelRegistry.get_active()
+            if active and active.model_hash != self.model_hash:
+                logger.info(
+                    "Active model changed (%s -> %s); reloading artifacts",
+                    self.model_hash,
+                    active.model_hash,
+                )
+                self.load_all_models()
+        except Exception as exc:
+            logger.warning("Active model refresh check failed: %s", exc)
     
     def _compute_file_hash(self, filepath: str) -> str:
         """Compute SHA256 hash of file for identity"""
@@ -412,6 +434,8 @@ class MLService:
         """
         from app.utils.errors import ModelNotLoadedError
         from app.services.feature_service import FeatureService
+
+        self._refresh_from_registry_if_needed()
         
         if self.model is None:
             raise ModelNotLoadedError("Model is not loaded. Cannot make predictions.")
@@ -541,6 +565,7 @@ class MLService:
         """
         from app.utils.errors import ModelNotLoadedError
         
+        self._refresh_from_registry_if_needed()
         if self.model is None:
             raise ModelNotLoadedError("Model is not loaded. Cannot make predictions.")
         
@@ -601,8 +626,8 @@ class MLService:
     
     def _score_to_label(self, score: float) -> str:
         """Convert churn score to label"""
-        low_threshold = float(current_app.config.get("RISK_LOW_THRESHOLD", 0.75))
-        high_threshold = float(current_app.config.get("RISK_HIGH_THRESHOLD", 0.95))
+        low_threshold = float(current_app.config.get("RISK_LOW_THRESHOLD", 0.39))
+        high_threshold = float(current_app.config.get("RISK_HIGH_THRESHOLD", 0.90))
         if score < low_threshold:
             return "low"
         elif score < high_threshold:

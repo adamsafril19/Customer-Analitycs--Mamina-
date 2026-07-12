@@ -1,13 +1,68 @@
-import { useState, useCallback } from "react";
-import { Upload, FileSpreadsheet, Users, CreditCard, MessageSquare, CheckCircle2, XCircle, AlertTriangle, ArrowRight, Loader2 } from "lucide-react";
+import { useState, useCallback, useMemo } from "react";
+import {
+  Upload,
+  FileSpreadsheet,
+  Users,
+  CreditCard,
+  MessageSquare,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ArrowRight,
+  Loader2,
+  ClipboardList,
+  Download,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { usePreviewCSV, useImportCSV } from "../hooks/useImport";
+import { importAPI } from "../lib/api";
 
 // ─── Tab definitions ─────────────────────────────────────────
 const TABS = [
-  { key: "customers", label: "Customers", icon: Users, color: "primary", description: "Import data pelanggan (customer_master.csv)", requiredCols: ["customer_id", "customer_name", "phone_number", "join_date"] },
-  { key: "transactions", label: "Transactions", icon: CreditCard, color: "emerald", description: "Import data transaksi (transactions.csv)", requiredCols: ["transaction_id", "customer_id", "transaction_date", "transaction_amount", "service_type", "transaction_status"] },
-  { key: "messages", label: "WhatsApp", icon: MessageSquare, color: "purple", description: "Import pesan WhatsApp (whatsapp_messages.csv)", requiredCols: ["message_id", "phone_number", "message_timestamp", "sender_type", "message_text"] },
+  {
+    key: "customers",
+    label: "Customers",
+    icon: Users,
+    color: "primary",
+    description: "Import data pelanggan (customer_master.xlsx atau customer_master.csv)",
+    acceptedExtensions: [".xlsx", ".xls", ".csv"],
+    templateFormat: "Excel",
+    requiredCols: ["customer_id", "customer_name", "phone_number", "join_date"],
+  },
+  {
+    key: "transactions",
+    label: "Transactions",
+    icon: CreditCard,
+    color: "emerald",
+    description: "Import data transaksi (transactions.xlsx atau transactions.csv)",
+    acceptedExtensions: [".xlsx", ".xls", ".csv"],
+    templateFormat: "Excel",
+    requiredCols: [
+      "transaction_id",
+      "customer_id",
+      "transaction_date",
+      "transaction_amount",
+      "service_type",
+      "transaction_status",
+    ],
+  },
+  {
+    key: "messages",
+    label: "WhatsApp",
+    icon: MessageSquare,
+    color: "purple",
+    description:
+      "Import pesan WhatsApp (whatsapp_messages.csv atau export .txt per customer)",
+    acceptedExtensions: [".csv", ".txt"],
+    templateFormat: "CSV",
+    requiredCols: [
+      "message_id",
+      "phone_number",
+      "message_timestamp",
+      "sender_type",
+      "message_text",
+    ],
+  },
 ];
 
 function getUploadErrorMessage(err, fallback) {
@@ -31,7 +86,8 @@ export default function DataImport() {
       <div>
         <h1 className="text-2xl font-bold text-primary-900">Import Data</h1>
         <p className="mt-1 text-sm text-stone-500">
-          Upload file CSV untuk memasukkan data ke sistem. Ikuti urutan: Customers → Transactions → Messages.
+          Upload file Excel/CSV untuk import customer dan transaksi, atau TXT/CSV WhatsApp untuk analisa
+          satu customer. Ikuti urutan: Customers → Transactions → Messages.
         </p>
       </div>
 
@@ -49,7 +105,9 @@ export default function DataImport() {
       <div className="border-b border-primary-200">
         <nav className="-mb-px flex space-x-8">
           {TABS.map((tab) => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? `border-${tab.color}-500 text-${tab.color}-600`
@@ -64,7 +122,10 @@ export default function DataImport() {
       </div>
 
       {/* Active tab content */}
-      {TABS.map((tab) => activeTab === tab.key && <ImportSection key={tab.key} tab={tab} />)}
+      {TABS.map(
+        (tab) =>
+          activeTab === tab.key && <ImportSection key={tab.key} tab={tab} />,
+      )}
     </div>
   );
 }
@@ -75,62 +136,119 @@ function ImportSection({ tab }) {
   const [step, setStep] = useState("upload"); // upload → preview → done
   const [previewData, setPreviewData] = useState(null);
   const [importResult, setImportResult] = useState(null);
+  const [txtMetadata, setTxtMetadata] = useState({
+    phone_number: "",
+    customer_sender_name: "",
+  });
 
   const previewMutation = usePreviewCSV(tab.key);
   const importMutation = useImportCSV(tab.key);
+  const selectedExt = file
+    ? `.${file.name.split(".").pop().toLowerCase()}`
+    : "";
+  const isWhatsAppTxt = tab.key === "messages" && selectedExt === ".txt";
+  const acceptedExtensions = useMemo(
+    () => tab.acceptedExtensions || [".csv"],
+    [tab.acceptedExtensions],
+  );
+  const acceptAttr = acceptedExtensions.join(",");
 
-  const handleFileSelect = useCallback((e) => {
-    const selected = e.target.files?.[0];
-    if (selected) {
-      if (!selected.name.toLowerCase().endsWith(".csv")) {
-        toast.error("Hanya file .csv yang diterima");
-        return;
+  const validateFile = useCallback(
+    (selected) => {
+      const ext = `.${selected.name.split(".").pop().toLowerCase()}`;
+      if (!acceptedExtensions.includes(ext)) {
+        toast.error(
+          `Hanya file ${acceptedExtensions.join(" atau ")} yang diterima`,
+        );
+        return false;
       }
-      setFile(selected);
-      setStep("upload");
-      setPreviewData(null);
-      setImportResult(null);
-    }
-  }, []);
+      return true;
+    },
+    [acceptedExtensions],
+  );
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    const dropped = e.dataTransfer.files?.[0];
-    if (dropped) {
-      if (!dropped.name.toLowerCase().endsWith(".csv")) {
-        toast.error("Hanya file .csv yang diterima");
-        return;
+  const handleFileSelect = useCallback(
+    (e) => {
+      const selected = e.target.files?.[0];
+      if (selected) {
+        if (!validateFile(selected)) return;
+        setFile(selected);
+        setStep("upload");
+        setPreviewData(null);
+        setImportResult(null);
       }
-      setFile(dropped);
-      setStep("upload");
-      setPreviewData(null);
-      setImportResult(null);
-    }
-  }, []);
+    },
+    [validateFile],
+  );
+
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      const dropped = e.dataTransfer.files?.[0];
+      if (dropped) {
+        if (!validateFile(dropped)) return;
+        setFile(dropped);
+        setStep("upload");
+        setPreviewData(null);
+        setImportResult(null);
+      }
+    },
+    [validateFile],
+  );
+
+  const getUploadPayload = useCallback(() => {
+    if (!isWhatsAppTxt) return file;
+    return {
+      file,
+      metadata: {
+        phone_number: txtMetadata.phone_number.trim(),
+        customer_sender_name: txtMetadata.customer_sender_name.trim(),
+      },
+    };
+  }, [file, isWhatsAppTxt, txtMetadata]);
 
   const handlePreview = useCallback(() => {
     if (!file) return;
-    previewMutation.mutate(file, {
-      onSuccess: (data) => { setPreviewData(data); setStep("preview"); },
-      onError: (err) => toast.error(getUploadErrorMessage(err, "Preview gagal")),
+    if (isWhatsAppTxt && !txtMetadata.phone_number.trim()) {
+      toast.error("Nomor customer wajib diisi untuk import WhatsApp TXT");
+      return;
+    }
+    previewMutation.mutate(getUploadPayload(), {
+      onSuccess: (data) => {
+        setPreviewData(data);
+        setStep("preview");
+      },
+      onError: (err) =>
+        toast.error(getUploadErrorMessage(err, "Preview gagal")),
     });
-  }, [file, previewMutation]);
+  }, [
+    file,
+    getUploadPayload,
+    isWhatsAppTxt,
+    previewMutation,
+    txtMetadata.phone_number,
+  ]);
 
   const handleImport = useCallback(() => {
     if (!file) return;
-    importMutation.mutate(file, {
+    importMutation.mutate(getUploadPayload(), {
       onSuccess: (data) => {
         setImportResult(data);
         setStep("done");
-        if (data.success) toast.success(`${data.imported} baris berhasil diimport!`);
+        if (data.success)
+          toast.success(`${data.imported} baris berhasil diimport!`);
         else toast.error("Import gagal — lihat detail error");
       },
       onError: (err) => toast.error(getUploadErrorMessage(err, "Import gagal")),
     });
-  }, [file, importMutation]);
+  }, [file, getUploadPayload, importMutation]);
 
   const handleReset = () => {
-    setFile(null); setStep("upload"); setPreviewData(null); setImportResult(null);
+    setFile(null);
+    setStep("upload");
+    setPreviewData(null);
+    setImportResult(null);
+    setTxtMetadata({ phone_number: "", customer_sender_name: "" });
   };
 
   return (
@@ -142,10 +260,33 @@ function ImportSection({ tab }) {
             <FileSpreadsheet className={`w-5 h-5 text-${tab.color}-600`} />
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-primary-900">{tab.description}</h3>
+            <h3 className="font-semibold text-primary-900">
+              {tab.description}
+            </h3>
             <p className="mt-1 text-xs text-stone-500">
-              Kolom wajib: <code className="bg-primary-100 px-1 rounded">{tab.requiredCols.join(", ")}</code>
+              Kolom wajib:{" "}
+              <code className="bg-primary-100 px-1 rounded">
+                {tab.requiredCols.join(", ")}
+              </code>
             </p>
+            {tab.key === "messages" && (
+              <p className="mt-1 text-xs text-stone-500">
+                CSV tetap untuk import massal. TXT dipakai untuk satu chat
+                customer dan membutuhkan nomor customer agar bisa dilink ke
+                customer_master.
+              </p>
+            )}
+            <button
+              onClick={() => {
+                importAPI.downloadTemplate(tab.key).catch(() =>
+                  toast.error("Gagal mengunduh template")
+                );
+              }}
+              className={`mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border-2 border-dashed border-${tab.color}-300 text-${tab.color}-700 bg-${tab.color}-50 hover:bg-${tab.color}-100 hover:border-${tab.color}-400 transition-all duration-200`}
+            >
+              <Download className="w-4 h-4" />
+              Download Template {tab.templateFormat || "CSV"}
+            </button>
           </div>
         </div>
       </div>
@@ -153,36 +294,109 @@ function ImportSection({ tab }) {
       {/* Step 1: Upload */}
       <div className="bg-white rounded-xl border border-primary-200 p-6">
         <div
-          onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
           className="border-2 border-dashed border-primary-300 rounded-xl p-8 text-center hover:border-primary-400 transition-colors cursor-pointer"
           onClick={() => document.getElementById(`file-${tab.key}`).click()}
         >
           <Upload className="w-10 h-10 text-primary-400 mx-auto mb-3" />
           <p className="text-sm text-stone-600">
             {file ? (
-              <span className="font-medium text-primary-900">{file.name} <span className="text-primary-400">({(file.size / 1024).toFixed(1)} KB)</span></span>
+              <span className="font-medium text-primary-900">
+                {file.name}{" "}
+                <span className="text-primary-400">
+                  ({(file.size / 1024).toFixed(1)} KB)
+                </span>
+              </span>
             ) : (
-              <>Drag & drop file CSV di sini, atau <span className="text-primary-600 font-medium">pilih file</span></>
+              <>
+                Drag & drop file {acceptedExtensions.join(" atau ")} di sini,
+                atau{" "}
+                <span className="text-primary-600 font-medium">pilih file</span>
+              </>
             )}
           </p>
-          <input id={`file-${tab.key}`} type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
+          <input
+            id={`file-${tab.key}`}
+            type="file"
+            accept={acceptAttr}
+            className="hidden"
+            onChange={handleFileSelect}
+          />
         </div>
+
+        {isWhatsAppTxt && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block">
+              <span className="text-xs font-medium text-stone-600">
+                Nomor customer
+              </span>
+              <input
+                type="text"
+                value={txtMetadata.phone_number}
+                onChange={(e) =>
+                  setTxtMetadata((prev) => ({
+                    ...prev,
+                    phone_number: e.target.value,
+                  }))
+                }
+                placeholder="Contoh: 08123456789"
+                className="mt-1 w-full rounded-lg border border-primary-200 px-3 py-2 text-sm text-primary-900 focus:border-primary-500 focus:outline-none"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-stone-600">
+                Nama pengirim customer di TXT
+              </span>
+              <input
+                type="text"
+                value={txtMetadata.customer_sender_name}
+                onChange={(e) =>
+                  setTxtMetadata((prev) => ({
+                    ...prev,
+                    customer_sender_name: e.target.value,
+                  }))
+                }
+                placeholder="Kosongkan jika pengirim pertama adalah customer"
+                className="mt-1 w-full rounded-lg border border-primary-200 px-3 py-2 text-sm text-primary-900 focus:border-primary-500 focus:outline-none"
+              />
+            </label>
+          </div>
+        )}
 
         {file && step === "upload" && (
           <div className="mt-4 flex gap-3">
-            <button onClick={handlePreview} disabled={previewMutation.isPending}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium rounded-lg hover:shadow-lg disabled:opacity-50 transition-all">
-              {previewMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            <button
+              onClick={handlePreview}
+              disabled={previewMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium rounded-lg hover:shadow-lg disabled:opacity-50 transition-all"
+            >
+              {previewMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
               Preview & Validate
             </button>
-            <button onClick={handleReset} className="px-4 py-2 text-sm text-stone-600 hover:text-primary-800">Reset</button>
+            <button
+              onClick={handleReset}
+              className="px-4 py-2 text-sm text-stone-600 hover:text-primary-800"
+            >
+              Reset
+            </button>
           </div>
         )}
       </div>
 
       {/* Step 2: Preview + Validation */}
       {step === "preview" && previewData && (
-        <PreviewPanel data={previewData} tab={tab} onImport={handleImport} onReset={handleReset} isImporting={importMutation.isPending} />
+        <PreviewPanel
+          data={previewData}
+          tab={tab}
+          onImport={handleImport}
+          onReset={handleReset}
+          isImporting={importMutation.isPending}
+        />
       )}
 
       {/* Step 3: Result */}
@@ -198,15 +412,33 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
   const { preview, validation } = data;
   const hasErrors = validation?.errors?.length > 0;
   const canImport = validation?.valid_rows > 0;
+  const provisionalPhoneRows = preview?.summary?.provisional_phone_rows ?? 0;
+  const provisionalPhoneCount = preview?.summary?.provisional_phone_count ?? 0;
 
   return (
     <div className="space-y-4">
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Baris" value={preview?.total_rows ?? 0} color="primary" />
-        <StatCard label="Valid" value={validation?.valid_rows ?? 0} color="green" />
-        <StatCard label="Invalid" value={validation?.invalid_rows ?? 0} color={validation?.invalid_rows > 0 ? "red" : "gray"} />
-        <StatCard label="Duplikat" value={preview?.summary?.duplicates ?? 0} color={preview?.summary?.duplicates > 0 ? "yellow" : "gray"} />
+        <StatCard
+          label="Total Baris"
+          value={preview?.total_rows ?? 0}
+          color="primary"
+        />
+        <StatCard
+          label="Valid"
+          value={validation?.valid_rows ?? 0}
+          color="green"
+        />
+        <StatCard
+          label="Invalid"
+          value={validation?.invalid_rows ?? 0}
+          color={validation?.invalid_rows > 0 ? "red" : "gray"}
+        />
+        <StatCard
+          label="Duplikat"
+          value={preview?.summary?.duplicates ?? 0}
+          color={preview?.summary?.duplicates > 0 ? "yellow" : "gray"}
+        />
       </div>
 
       {/* Enhanced Statistics Report Card */}
@@ -217,34 +449,65 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
-            <span className="text-xs text-stone-500 font-medium">Integritas Baris Data</span>
+            <span className="text-xs text-stone-500 font-medium">
+              Integritas Baris Data
+            </span>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-emerald-600">{validation?.valid_rows ?? 0}</span>
+              <span className="text-2xl font-bold text-emerald-600">
+                {validation?.valid_rows ?? 0}
+              </span>
               <span className="text-xs text-stone-400">Valid</span>
-              <span className="text-2xl font-bold text-rose-500 ml-auto">{validation?.invalid_rows ?? 0}</span>
+              <span className="text-2xl font-bold text-rose-500 ml-auto">
+                {validation?.invalid_rows ?? 0}
+              </span>
               <span className="text-xs text-stone-400">Invalid</span>
             </div>
-            <p className="text-[11px] text-stone-400 mt-2">Seluruh baris dengan format kolom tidak sesuai atau nilai kosong akan ditandai invalid.</p>
-          </div>
-          
-          <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
-            <span className="text-xs text-stone-500 font-medium">Deteksi Duplikasi Data</span>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-amber-600">{preview?.summary?.duplicates ?? 0}</span>
-              <span className="text-xs text-stone-400">Baris terdeteksi duplikat</span>
-            </div>
-            <p className="text-[11px] text-stone-400 mt-2">Sistem otomatis mendeteksi dan memperbarui atau melewati record dengan ID yang sama.</p>
+            <p className="text-[11px] text-stone-400 mt-2">
+              Seluruh baris dengan format kolom tidak sesuai atau nilai kosong
+              akan ditandai invalid.
+            </p>
           </div>
 
           <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
-            <span className="text-xs text-stone-500 font-medium">Timestamp & Sinkronisasi Relasional</span>
+            <span className="text-xs text-stone-500 font-medium">
+              Deteksi Duplikasi Data
+            </span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-amber-600">
+                {preview?.summary?.duplicates ?? 0}
+              </span>
+              <span className="text-xs text-stone-400">
+                Baris terdeteksi duplikat
+              </span>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-2">
+              Sistem otomatis mendeteksi dan memperbarui atau melewati record
+              dengan ID yang sama.
+            </p>
+          </div>
+
+          <div className="bg-white/80 p-4 rounded-xl border border-pink-50 flex flex-col justify-between">
+            <span className="text-xs text-stone-500 font-medium">
+              {tab.key === "messages"
+                ? "Status Linking Nomor WhatsApp"
+                : "Timestamp & Sinkronisasi Relasional"}
+            </span>
             <div className="mt-2 flex items-baseline gap-2">
               <span className="text-2xl font-bold text-primary-600">
-                {(preview?.summary?.invalid_fk ?? 0) + (preview?.summary?.invalid_phone_fk ?? 0)}
+                {tab.key === "messages"
+                  ? provisionalPhoneRows
+                  : (preview?.summary?.invalid_fk ?? 0) +
+                    (preview?.summary?.invalid_phone_fk ?? 0)}
               </span>
-              <span className="text-xs text-stone-400">Gagal Relasi</span>
+              <span className="text-xs text-stone-400">
+                {tab.key === "messages" ? "Pesan provisional" : "Gagal Relasi"}
+              </span>
             </div>
-            <p className="text-[11px] text-stone-400 mt-2">Baris yang tidak memiliki relasi customer valid akan ditolak demi integritas database.</p>
+            <p className="text-[11px] text-stone-400 mt-2">
+              {tab.key === "messages"
+                ? `${provisionalPhoneCount} nomor belum cocok dengan customer master dan akan disimpan sebagai provisional.`
+                : "Baris yang tidak memiliki relasi customer valid akan ditolak demi integritas database."}
+            </p>
           </div>
         </div>
       </div>
@@ -253,14 +516,35 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
       {preview?.summary?.invalid_fk > 0 && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          <span><strong>{preview.summary.invalid_fk}</strong> baris memiliki customer_id yang tidak ditemukan di database. Import customers terlebih dahulu.</span>
+          <span>
+            <strong>{preview.summary.invalid_fk}</strong> baris memiliki
+            customer_id yang tidak ditemukan di database. Import customers
+            terlebih dahulu.
+          </span>
         </div>
       )}
 
       {preview?.summary?.invalid_phone_fk > 0 && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          <span><strong>{preview.summary.invalid_phone_fk}</strong> baris memiliki phone_number yang belum ada di customer_master. Import customers terlebih dahulu.</span>
+          <span>
+            <strong>{preview.summary.invalid_phone_fk}</strong> baris memiliki
+            phone_number yang belum ada di customer_master. Import customers
+            terlebih dahulu.
+          </span>
+        </div>
+      )}
+
+      {provisionalPhoneRows > 0 && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <strong>{provisionalPhoneRows}</strong> pesan dari{" "}
+            <strong>{provisionalPhoneCount}</strong> nomor belum cocok dengan
+            customer master. Data tetap dapat diimpor sebagai provisional,
+            tetapi tidak digunakan untuk training sampai identitasnya
+            diverifikasi.
+          </span>
         </div>
       )}
 
@@ -268,25 +552,45 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
       {preview?.rows?.length > 0 && (
         <div className="bg-white rounded-xl border border-primary-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-primary-100 bg-primary-50">
-            <h4 className="text-sm font-medium text-primary-800">Preview ({Math.min(preview.rows.length, 20)} dari {preview.total_rows} baris)</h4>
+            <h4 className="text-sm font-medium text-primary-800">
+              Preview ({Math.min(preview.rows.length, 20)} dari{" "}
+              {preview.total_rows} baris)
+            </h4>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-primary-50">
                 <tr>
                   {preview.columns.map((col) => (
-                    <th key={col} className="px-3 py-2 text-left font-medium text-stone-500 uppercase tracking-wider whitespace-nowrap">{col}</th>
+                    <th
+                      key={col}
+                      className="px-3 py-2 text-left font-medium text-stone-500 uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {col}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {preview.rows.map((row, i) => {
-                  const rowErrors = (validation?.errors || []).filter((e) => e.row === i + 2);
+                  const rowErrors = (validation?.errors || []).filter(
+                    (e) => e.row === i + 2,
+                  );
                   const errorCols = new Set(rowErrors.map((e) => e.column));
                   return (
-                    <tr key={i} className={rowErrors.length > 0 ? "bg-red-50" : "hover:bg-primary-50"}>
+                    <tr
+                      key={i}
+                      className={
+                        rowErrors.length > 0
+                          ? "bg-red-50"
+                          : "hover:bg-primary-50"
+                      }
+                    >
                       {preview.columns.map((col) => (
-                        <td key={col} className={`px-3 py-2 whitespace-nowrap max-w-[200px] truncate ${errorCols.has(col) ? "text-red-600 font-medium" : "text-primary-800"}`}>
+                        <td
+                          key={col}
+                          className={`px-3 py-2 whitespace-nowrap max-w-[200px] truncate ${errorCols.has(col) ? "text-red-600 font-medium" : "text-primary-800"}`}
+                        >
                           {String(row[col] ?? "")}
                         </td>
                       ))}
@@ -304,23 +608,32 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
         <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-red-100 bg-red-50">
             <h4 className="text-sm font-medium text-red-700 flex items-center gap-2">
-              <XCircle className="w-4 h-4" /> Validation Errors ({validation.errors.length})
+              <XCircle className="w-4 h-4" /> Validation Errors (
+              {validation.errors.length})
             </h4>
           </div>
           <div className="max-h-60 overflow-y-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-primary-50 sticky top-0">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-stone-500">Baris</th>
-                  <th className="px-3 py-2 text-left font-medium text-stone-500">Kolom</th>
-                  <th className="px-3 py-2 text-left font-medium text-stone-500">Error</th>
+                  <th className="px-3 py-2 text-left font-medium text-stone-500">
+                    Baris
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-stone-500">
+                    Kolom
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-stone-500">
+                    Error
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {validation.errors.slice(0, 50).map((err, i) => (
                   <tr key={i} className="hover:bg-red-50">
                     <td className="px-3 py-1.5 text-stone-600">{err.row}</td>
-                    <td className="px-3 py-1.5 font-mono text-primary-800">{err.column}</td>
+                    <td className="px-3 py-1.5 font-mono text-primary-800">
+                      {err.column}
+                    </td>
                     <td className="px-3 py-1.5 text-red-600">{err.message}</td>
                   </tr>
                 ))}
@@ -330,14 +643,33 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
         </div>
       )}
 
+      {validation?.errors_truncated && (
+        <p className="text-xs text-stone-500">
+          Detail error dibatasi hingga {validation.errors.length} baris; jumlah
+          invalid di ringkasan mencakup seluruh file.
+        </p>
+      )}
+
       {/* Action buttons */}
       <div className="flex gap-3">
-        <button onClick={onImport} disabled={!canImport || isImporting}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-          {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        <button
+          onClick={onImport}
+          disabled={!canImport || isImporting}
+          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isImporting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Upload className="w-4 h-4" />
+          )}
           Import {validation?.valid_rows ?? 0} Baris Valid
         </button>
-        <button onClick={onReset} className="px-4 py-2 text-sm text-stone-600 hover:text-primary-800">Batal</button>
+        <button
+          onClick={onReset}
+          className="px-4 py-2 text-sm text-stone-600 hover:text-primary-800"
+        >
+          Batal
+        </button>
       </div>
     </div>
   );
@@ -346,26 +678,50 @@ function PreviewPanel({ data, tab, onImport, onReset, isImporting }) {
 // ─── Result Panel ────────────────────────────────────────────
 function ResultPanel({ result, onReset }) {
   return (
-    <div className={`rounded-xl border p-6 ${result.success ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
+    <div
+      className={`rounded-xl border p-6 ${result.success ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}
+    >
       <div className="flex items-start gap-3">
-        {result.success ? <CheckCircle2 className="w-6 h-6 text-emerald-600 mt-0.5" /> : <XCircle className="w-6 h-6 text-red-600 mt-0.5" />}
+        {result.success ? (
+          <CheckCircle2 className="w-6 h-6 text-emerald-600 mt-0.5" />
+        ) : (
+          <XCircle className="w-6 h-6 text-red-600 mt-0.5" />
+        )}
         <div className="flex-1">
-          <h3 className={`font-semibold ${result.success ? "text-emerald-800" : "text-red-800"}`}>
+          <h3
+            className={`font-semibold ${result.success ? "text-emerald-800" : "text-red-800"}`}
+          >
             {result.success ? "Import Berhasil!" : "Import Gagal"}
           </h3>
           <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
-            <div><span className="text-stone-500">Diimport:</span> <strong className="text-emerald-700">{result.imported}</strong></div>
-            <div><span className="text-stone-500">Dilewati:</span> <strong className="text-yellow-700">{result.skipped}</strong></div>
-            <div><span className="text-stone-500">Duplikat:</span> <strong className="text-stone-600">{result.duplicates_ignored}</strong></div>
+            <div>
+              <span className="text-stone-500">Diimport:</span>{" "}
+              <strong className="text-emerald-700">{result.imported}</strong>
+            </div>
+            <div>
+              <span className="text-stone-500">Dilewati:</span>{" "}
+              <strong className="text-yellow-700">{result.skipped}</strong>
+            </div>
+            <div>
+              <span className="text-stone-500">Duplikat:</span>{" "}
+              <strong className="text-stone-600">
+                {result.duplicates_ignored}
+              </strong>
+            </div>
           </div>
           {result.errors?.length > 0 && (
             <div className="mt-3 max-h-40 overflow-y-auto text-xs bg-white/50 rounded-lg p-3 space-y-1">
               {result.errors.slice(0, 20).map((err, i) => (
-                <div key={i} className="text-red-600">Baris {err.row}: [{err.column}] {err.message}</div>
+                <div key={i} className="text-red-600">
+                  Baris {err.row}: [{err.column}] {err.message}
+                </div>
               ))}
             </div>
           )}
-          <button onClick={onReset} className="mt-4 px-4 py-2 bg-white border border-primary-300 text-sm text-primary-800 rounded-lg hover:bg-primary-50 transition-colors">
+          <button
+            onClick={onReset}
+            className="mt-4 px-4 py-2 bg-white border border-primary-300 text-sm text-primary-800 rounded-lg hover:bg-primary-50 transition-colors"
+          >
             Import File Lain
           </button>
         </div>
@@ -377,8 +733,11 @@ function ResultPanel({ result, onReset }) {
 // ─── Stat Card ───────────────────────────────────────────────
 function StatCard({ label, value, color }) {
   const colors = {
-    primary: "bg-primary-50 text-primary-700", green: "bg-emerald-50 text-emerald-700",
-    red: "bg-rose-50 text-rose-700", yellow: "bg-amber-50 text-amber-700", gray: "bg-primary-50 text-stone-500",
+    primary: "bg-primary-50 text-primary-700",
+    green: "bg-emerald-50 text-emerald-700",
+    red: "bg-rose-50 text-rose-700",
+    yellow: "bg-amber-50 text-amber-700",
+    gray: "bg-primary-50 text-stone-500",
   };
   return (
     <div className={`rounded-lg px-4 py-3 ${colors[color] || colors.gray}`}>

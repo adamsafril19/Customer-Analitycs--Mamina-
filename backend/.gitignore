@@ -118,6 +118,7 @@ dmypy.json
 models/*.pkl
 models/*.joblib
 models/topic_model
+models/topic_model_legacy_*
 
 # Logs
 logs/

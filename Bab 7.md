@@ -1,0 +1,47 @@
+# BAB VII. KESIMPULAN DAN SARAN
+
+## 7.1 Kesimpulan
+
+Penelitian ini bertujuan untuk mengembangkan sistem intelijen pelanggan berbasis *behavioral risk scoring* pada Mamina Baby Spa & Pijat Laktasi melalui pendekatan machine learning berbasis transaksi, NLP sebagai konteks customer voice, dan analitik preskriptif. Berdasarkan hasil implementasi dan pengujian sistem yang telah diuraikan pada Bab V dan Bab VI, berikut adalah kesimpulan yang relevan terhadap masing-masing tujuan penelitian yang telah ditetapkan:
+
+**1. Pengembangan Arsitektur NLP untuk Ekstraksi Representasi Semantik**
+
+Arsitektur NLP yang dikembangkan berhasil memproses data percakapan WhatsApp yang bersifat informal, tidak terstruktur, dan mengandung bahasa gaul (slang) serta alih kode (code-mixing) khas Indonesia. Pipeline NLP yang diimplementasikan terdiri atas empat komponen dengan peran yang berbeda: (a) ekstraksi *complaint flag* berbasis aturan deterministik kontekstual, (b) klasifikasi sentimen menggunakan IndoBERTweet untuk menghasilkan `sentiment_label` dan `sentiment_score` pada level pesan yang kemudian diagregasikan menjadi *avg_sentiment_score*, (c) *sentence embedding* menggunakan MiniLM untuk mendukung pencarian kemiripan semantik (*nearest messages*) dan pengelompokan topik, serta (d) pemodelan topik eksploratoris menggunakan BERTopic dengan pemetaan label bisnis untuk dashboard. Dari 25.346 pesan yang diimpor, 11.993 pesan *trusted* berhasil diproses dan dihubungkan ke 109 pelanggan terdaftar. Representasi semantik yang dihasilkan berhasil dimanfaatkan sebagai *customer voice context* dalam sistem rekomendasi, meskipun cakupan pelanggan dengan pesan trusted masih rendah, yaitu 109 dari 2.423 customer yang di-*score* atau sekitar 4,5%. Kondisi tersebut menyebabkan fitur NLP belum digunakan sebagai pengubah langsung *risk score* model produksi.
+
+**2. Pengembangan dan Evaluasi Model Behavioral Risk Scoring**
+
+Model estimasi risiko perilaku pelanggan berhasil dikembangkan menggunakan arsitektur *gated_transaction_xgb_logistic* yang terdiri atas XGBoost berbasis skema 25 fitur v3.2.0 dan komponen *logistic adjustment* bersyarat untuk menguji kelayakan integrasi sinyal komunikasi. Dalam model produksi, komponen prediktif yang dipertahankan secara efektif adalah model berbasis transaksi karena sinyal komunikasi belum memenuhi guardrail validasi. Evaluasi pada *test split* temporal model aktif `v20260707_211306` menunjukkan kinerja yang baik dengan ROC-AUC 0,8426, PR-AUC 0,9286, Precision 0,8366, Recall 0,9235, F1-Score 0,8779, dan threshold operasional 0,39. Hasil ini berada dalam rentang yang konsisten dengan penelitian terdahulu pada domain sejenis, dengan mempertimbangkan bahwa label target menggunakan *temporal proxy label* pada bisnis non-kontraktual yang secara inheren lebih bervariasi dibandingkan label churn eksplisit. Komponen *gated logistic adjustment* dinonaktifkan secara otomatis (*fail-closed*) setelah validasi komparatif menunjukkan penurunan kinerja pada kohort komunikasi, yaitu ROC-AUC turun 0,0273 dan PR-AUC turun 0,0279. Dengan demikian, model berbasis transaksi lebih baik pada kondisi dataset dan cakupan komunikasi penelitian ini, tetapi hasil tersebut tidak dimaksudkan sebagai kesimpulan universal bahwa pendekatan gated selalu lebih rendah daripada model transaksi.
+
+**3. Pengembangan Purwarupa Dashboard Intelijen Pelanggan dan Sistem Rekomendasi Dinamis**
+
+Purwarupa dashboard intelijen pelanggan berbasis web berhasil dikembangkan dan mencakup delapan modul antarmuka utama: Dashboard Behavioral Risk Scoring, Customer List, Customer Detail 360, Risk Prioritization, Action Management, Data Import, ML Pipeline, dan Model Evaluation. Seluruh 14 kebutuhan fungsional (KF-01 s.d. KF-14) berhasil diimplementasikan dan diverifikasi melalui pengujian fungsional *black-box*. Recommendation Policy v2 berhasil menghasilkan 2.423 rekomendasi terstruktur—mencakup tujuan, *timing*, saluran, contoh pembuka, dan *reason codes*—untuk seluruh pelanggan yang di-*score*, di mana 100 rekomendasi dipersonalisasi menggunakan *customer voice* dan 2.323 menggunakan *fallback* berbasis kondisi transaksi. Dashboard juga mengintegrasikan SHAP *explainability*, *nearest messages* berbasis *semantic similarity*, serta mekanisme *review* rekomendasi oleh admin (*human-in-the-loop*).
+
+**4. Analisis Potensi Perubahan Pendekatan dari Reaktif ke Proaktif**
+
+Sistem yang dikembangkan menunjukkan potensi yang nyata dalam mendorong perubahan pendekatan manajemen dari reaktif menjadi proaktif. Distribusi prediksi menunjukkan 1.265 pelanggan (52,2%) teridentifikasi berada pada kategori *high risk*, sebuah informasi yang sebelumnya tidak dapat diperoleh tanpa inspeksi manual yang masif. Distribusi kondisi transaksi yang menunjukkan dominasi *dormant* (63,5% pelanggan) adalah temuan operasional independen yang memberikan gambaran komprehensif tentang kondisi basis pelanggan Mamina saat ini. Dengan adanya *risk score*, SHAP *explainability*, dan Recommendation Policy yang dapat ditelusuri (*auditable*), manajemen memiliki dasar analitis yang lebih solid untuk memprioritaskan intervensi retensi sebelum pelanggan berhenti bertransaksi sepenuhnya.
+
+---
+
+## 7.2 Saran
+
+Berdasarkan proses penelitian dan hasil evaluasi yang telah dilakukan, terdapat beberapa keterbatasan yang masih dapat diperbaiki pada penelitian berikutnya. Saran berikut disusun berdasarkan masalah yang ditemukan selama implementasi dan pengujian sistem:
+
+**1. Perluasan Cakupan Data Komunikasi melalui Consent Aktif**
+
+Keterbatasan terbesar sistem saat ini adalah rendahnya cakupan data komunikasi yang dapat dihubungkan ke customer terdaftar. Dari 2.423 customer yang di-*score*, hanya 109 customer atau sekitar 4,5% yang memiliki pesan trusted, dan hanya 47 customer yang tersedia pada kohort validasi gated adjustment. Untuk memperbaiki hal tersebut, penelitian berikutnya dapat menerapkan mekanisme *consent* aktif secara langsung kepada pelanggan, misalnya melalui pesan sambutan ketika pelanggan pertama kali menghubungi via WhatsApp, untuk meminta nomor telepon yang sesuai dengan data pendaftaran mereka. Peningkatan cakupan data komunikasi ini diharapkan dapat memenuhi ambang batas minimum yang diperlukan untuk mengaktifkan komponen *gated logistic adjustment* dan secara bertahap meningkatkan kontribusi sinyal NLP pada *risk score* model produksi.
+
+**2. Pengembangan Complaint Intent Classifier pada Domain Spesifik Mamina**
+
+IndoBERTweet yang digunakan saat ini sudah menghasilkan label dan skor sentimen pada level pesan, tetapi model tersebut merupakan model *general-purpose* untuk klasifikasi polaritas, bukan model khusus untuk membedakan komplain layanan dari konsultasi laktasi atau diskusi *caregiving*. Pada percakapan domain Mamina, banyak pesan bernada negatif berkaitan dengan kondisi bayi atau ibu, bukan ketidakpuasan terhadap layanan. Penulis menyarankan pembuatan dataset berlabel secara manual (*complaint / non-complaint*) pada sampel percakapan Mamina, kemudian digunakan untuk melatih *complaint intent classifier* khusus domain tersebut. Pendekatan ini diperkirakan akan meningkatkan presisi *complaint flag* secara signifikan dan memungkinkan penggantian sebagian aturan deterministik dengan klasifikasi berbasis model yang lebih adaptif.
+
+**3. Penambahan Evaluasi Longitudinal Recommendation Policy**
+
+Recommendation Policy v2 saat ini bersifat deterministik dan dapat ditelusuri, namun belum dievaluasi berdasarkan *outcome* nyata dari intervensi yang dilakukan. Penulis menyarankan perancangan eksperimen evaluasi terkontrol (*A/B testing* atau desain *quasi-experimental*) dalam jangka waktu minimal 3–6 bulan setelah sistem digunakan operasional: membandingkan tingkat kembalinya pelanggan (*win-back rate*) pada kelompok yang menerima rekomendasi sistem versus kelompok yang ditangani secara konvensional. Evaluasi ini akan memberikan validasi kuantitatif terhadap nilai bisnis nyata dari sistem rekomendasi yang dikembangkan.
+
+**4. Pengujian Kegunaan (Usability Testing) Terstruktur dengan Pengguna Akhir**
+
+Pengujian sistem saat ini terbatas pada verifikasi fungsional (*black-box testing*). Penulis menyarankan dilakukannya pengujian kegunaan terstruktur yang melibatkan pengguna akhir aktual (admin operasional dan manajer Mamina) menggunakan instrumen standar seperti *System Usability Scale* (SUS) atau *Technology Acceptance Model* (TAM). Hasil pengujian ini akan memberikan dimensi evaluasi berbasis perspektif pengguna yang melengkapi evaluasi teknis model, sekaligus menjadi dasar iterasi desain antarmuka agar lebih sesuai dengan pola kerja manajemen.
+
+**5. Eksplorasi Label Target Multimodal untuk Training Berikutnya**
+
+Label target saat ini didefinisikan secara *unimodal* berbasis ketidakaktifan transaksi (*temporal proxy label*). Pada iterasi training berikutnya, penulis menyarankan eksplorasi definisi label yang lebih kaya dengan menggabungkan sinyal transaksional dan sinyal komunikasi secara bersamaan—misalnya, mendefinisikan "risiko tinggi" hanya jika pelanggan menunjukkan ketidakaktifan transaksi *sekaligus* penurunan sentimen komunikasi yang signifikan dalam periode yang sama. Label gabungan ini diharapkan menghasilkan *proxy* yang lebih dekat dengan kondisi pelanggan yang berisiko secara aktual, dan secara bersamaan membuka penggunaan sinyal NLP sebagai penentu label (bukan hanya sebagai fitur), sebuah pendekatan yang belum dapat dilakukan pada penelitian ini akibat keterbatasan cakupan data saat ini.

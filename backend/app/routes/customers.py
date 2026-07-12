@@ -3,9 +3,9 @@ Customer Endpoints
 
 UPDATED: Uses correct ontology (numeric + text_signals for ML, text_semantics for dashboard)
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from flasgger import swag_from
 from sqlalchemy import func
 
@@ -16,12 +16,13 @@ from app.models.prediction import ChurnPrediction
 from app.models.numeric_features import CustomerNumericFeatures
 from app.models.text_signals import CustomerTextSignals
 from app.models.text_semantics import CustomerTextSemantics
-from app.models.feedback import FeedbackFeatures, FeedbackRaw
-from app.models.topic import ShapCache
+from app.models.feedback import FeedbackFeatures, FeedbackLinked, FeedbackRaw
+from app.models.recommendation_context import RecommendationContext
+from app.models.topic import ShapCache, Topic
 from app.services.feature_service import FeatureService
 from app.utils.errors import NotFoundError, ValidationError
 from app.utils.validators import validate_uuid, validate_pagination, validate_required_fields
-from app.utils.auth import hash_phone_number
+from app.utils.auth import admin_required, hash_phone_number
 
 customers_bp = Blueprint("customers", __name__)
 
@@ -143,9 +144,51 @@ def get_customer_360(customer_id: str):
                 )[:10]
             ]
 
+        dominant_topic_id = semantics.get_dominant_topic()
+        topic_lookup = {}
+        topic_counts = semantics.top_topic_counts or {}
+        if topic_counts and semantics.topic_model_version:
+            topic_indexes = []
+            for topic_idx in topic_counts.keys():
+                try:
+                    topic_indexes.append(int(topic_idx))
+                except (TypeError, ValueError):
+                    continue
+            if topic_indexes:
+                topic_rows = Topic.query.filter(
+                    Topic.model_version == semantics.topic_model_version,
+                    Topic.topic_idx.in_(topic_indexes),
+                ).all()
+                topic_lookup = {
+                    str(topic.topic_idx): topic
+                    for topic in topic_rows
+                }
+
+        dominant_topic = topic_lookup.get(str(dominant_topic_id))
+        resolved_topic_counts = [
+            {
+                "topic_id": topic_idx,
+                "topic_name": (
+                    topic_lookup.get(str(topic_idx)).name
+                    if topic_lookup.get(str(topic_idx)) else f"Topic {topic_idx}"
+                ),
+                "count": int(count or 0),
+                "keywords": (
+                    list(topic_lookup.get(str(topic_idx)).top_keywords or [])[:5]
+                    if topic_lookup.get(str(topic_idx)) else []
+                ),
+            }
+            for topic_idx, count in sorted(
+                topic_counts.items(),
+                key=lambda item: int(item[1] or 0),
+                reverse=True,
+            )
+        ]
+
         text_semantics = {
             "as_of_date": semantics.as_of_date.isoformat() if semantics.as_of_date else None,
             "top_topic_counts": semantics.top_topic_counts or {},
+            "resolved_topic_counts": resolved_topic_counts,
             "avg_topic_similarity": semantics.avg_topic_similarity or 0,
             "topic_model_version": semantics.topic_model_version,
             "sentiment_dist": semantics.sentiment_dist or {},
@@ -153,7 +196,16 @@ def get_customer_360(customer_id: str):
             "sentiment_model_version": semantics.sentiment_model_version,
             "top_keywords": top_keywords,
             "top_complaint_types": semantics.top_complaint_types or {},
-            "dominant_topic": semantics.get_dominant_topic(),
+            "dominant_topic": dominant_topic_id,
+            "dominant_topic_name": (
+                dominant_topic.name
+                if dominant_topic and dominant_topic.name
+                else (f"Topic {dominant_topic_id}" if dominant_topic_id is not None else None)
+            ),
+            "dominant_topic_keywords": (
+                list(dominant_topic.top_keywords or [])[:8]
+                if dominant_topic else []
+            ),
             "dominant_sentiment": semantics.get_dominant_sentiment()
         }
     
@@ -196,6 +248,14 @@ def get_customer_360(customer_id: str):
             prediction_data["shap_cached"] = True
             prediction_data["explanation_type"] = cache.explanation_type
             prediction_data["nearest_messages"] = cache.nearest_messages
+
+    recommendation_context = None
+    if latest_prediction:
+        recommendation = RecommendationContext.query.filter_by(
+            pred_id=latest_prediction.pred_id
+        ).first()
+        if recommendation:
+            recommendation_context = recommendation.to_dict()
     
     # Get recent-window messages from semantic snapshot for drilldown.
     last_messages = []
@@ -212,7 +272,8 @@ def get_customer_360(customer_id: str):
                     "msg_id": str(fb.msg_id),
                     "text_snippet": text[:100] + "..." if len(text) > 100 else text,
                     "dominant_sentiment": semantics.get_dominant_sentiment(),
-                    "sentiment_label": semantics.get_dominant_sentiment(),
+                    "sentiment_label": fb.sentiment_label,
+                    "sentiment_score": fb.sentiment_score,
                     "has_complaint": fb.has_complaint
                 })
 
@@ -234,6 +295,28 @@ def get_customer_360(customer_id: str):
             "text_snippet": text[:140] + "..." if len(text) > 140 else text,
             "has_complaint": bool(fb.has_complaint),
             "has_refund_request": bool(fb.has_refund_request),
+            "sentiment_label": fb.sentiment_label,
+            "sentiment_score": fb.sentiment_score,
+        })
+
+    complaint_messages = []
+    complaint_rows = db.session.query(FeedbackRaw, FeedbackFeatures).join(
+        FeedbackFeatures, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
+    ).filter(
+        FeedbackFeatures.customer_id == customer_uuid,
+        FeedbackFeatures.has_complaint.is_(True)
+    ).order_by(FeedbackRaw.timestamp.desc()).limit(5).all()
+    for raw, fb in complaint_rows:
+        text = raw.text or ""
+        complaint_messages.append({
+            "msg_id": str(raw.msg_id),
+            "timestamp": raw.timestamp.isoformat() if raw.timestamp else None,
+            "direction": raw.direction,
+            "text_snippet": text[:180] + "..." if len(text) > 180 else text,
+            "has_complaint": bool(fb.has_complaint),
+            "has_refund_request": bool(fb.has_refund_request),
+            "sentiment_label": fb.sentiment_label,
+            "sentiment_score": fb.sentiment_score,
         })
     
     # Quick stats
@@ -253,9 +336,96 @@ def get_customer_360(customer_id: str):
         "text_semantics": text_semantics,      # Dashboard only
         "transaction_summary": transaction_summary,
         "latest_prediction": prediction_data,
+        "recommendation_context": recommendation_context,
         "last_messages": last_messages,
         "historical_messages": historical_messages,
+        "complaint_messages": complaint_messages,
         "quick_stats": quick_stats
+    })
+
+
+@customers_bp.route("/recommendations/<context_id>/review", methods=["PATCH"])
+@jwt_required()
+@admin_required
+def review_recommendation(context_id: str):
+    context_uuid = validate_uuid(context_id, "context_id")
+    context = RecommendationContext.query.get(context_uuid)
+    if not context:
+        raise NotFoundError(f"Recommendation context {context_id} not found")
+
+    payload = request.get_json(silent=True) or {}
+    status = str(payload.get("status", "")).lower()
+    if status not in {"accepted", "rejected", "pending"}:
+        raise ValidationError(
+            "status must be one of: accepted, rejected, pending"
+        )
+    identity = get_jwt_identity()
+    context.review_status = status
+    context.reviewed_by = (
+        str(identity.get("username") or identity.get("sub"))
+        if isinstance(identity, dict)
+        else str(identity)
+    )
+    context.reviewed_at = datetime.utcnow() if status != "pending" else None
+    db.session.commit()
+    return jsonify(context.to_dict())
+
+
+@customers_bp.route("/leads/insights", methods=["GET"])
+@jwt_required()
+def get_lead_insights():
+    """Operational lead coverage, kept separate from member churn scoring."""
+    as_of = FeatureService.get_default_as_of_date()
+    limit = min(100, max(1, request.args.get("limit", 20, type=int)))
+    rows = (
+        db.session.query(
+            Customer.customer_id,
+            Customer.name,
+            func.count(FeedbackRaw.msg_id).label("message_count"),
+            func.count(FeedbackRaw.msg_id).filter(
+                FeedbackRaw.direction == "inbound"
+            ).label("inbound_count"),
+            func.max(FeedbackRaw.timestamp).label("last_message_at"),
+        )
+        .join(
+            FeedbackLinked,
+            FeedbackLinked.customer_id == Customer.customer_id,
+        )
+        .join(FeedbackRaw, FeedbackRaw.msg_id == FeedbackLinked.msg_id)
+        .filter(Customer.is_provisional.is_(True))
+        .group_by(Customer.customer_id, Customer.name)
+        .order_by(func.max(FeedbackRaw.timestamp).desc())
+        .all()
+    )
+    active_30d = sum(
+        1
+        for row in rows
+        if row.last_message_at
+        and row.last_message_at.date() >= as_of - timedelta(days=29)
+    )
+    return jsonify({
+        "separation": "lead_conversion_not_customer_churn",
+        "nlp_status": "withheld_unverified_identity_and_consent",
+        "as_of_date": as_of.isoformat(),
+        "summary": {
+            "total_leads": len(rows),
+            "total_messages": sum(int(row.message_count or 0) for row in rows),
+            "active_leads_30d": active_30d,
+        },
+        "items": [
+            {
+                "lead_id": str(row.customer_id),
+                "display_name": row.name,
+                "message_count": int(row.message_count or 0),
+                "inbound_count": int(row.inbound_count or 0),
+                "last_message_at": (
+                    row.last_message_at.isoformat()
+                    if row.last_message_at else None
+                ),
+                "recommended_action": "Review identitas dan consent sebelum analisis NLP",
+            }
+            for row in rows[:limit]
+        ],
     })
 
 
@@ -299,7 +469,7 @@ def get_customer_timeline(customer_id: str):
             FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
         ).filter(
             FeedbackFeatures.customer_id == customer_uuid
-        ).order_by(FeedbackFeatures.processed_at.desc()).limit(limit).all()
+        ).order_by(FeedbackRaw.timestamp.desc()).limit(limit).all()
         
         semantics = CustomerTextSemantics.query.filter_by(
             customer_id=customer_uuid
@@ -312,9 +482,11 @@ def get_customer_timeline(customer_id: str):
             timeline_items.append({
                 "id": str(fb.feature_id),
                 "type": "feedback",
-                "date": fb.processed_at.isoformat() if fb.processed_at else None,
+                "date": raw.timestamp.isoformat() if raw and raw.timestamp else None,
                 "description": description,
-                "sentiment": semantics.get_dominant_sentiment() if semantics else None,
+                "direction": raw.direction if raw else None,
+                "sentiment": fb.sentiment_label,
+                "sentiment_score": fb.sentiment_score,
                 "has_complaint": fb.has_complaint
             })
     

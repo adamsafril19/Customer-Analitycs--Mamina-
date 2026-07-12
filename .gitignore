@@ -28,3 +28,6 @@ halamanRef/pengaturan_konfigurasi/code.html
 halamanRef/pengaturan_konfigurasi/screen.png
 halamanRef/prioritas_risiko_pelanggan/code.html
 halamanRef/prioritas_risiko_pelanggan/screen.png
+dataset/
+rekomendasi_export_500_customer.md
+tmp_trusted_messages.csv

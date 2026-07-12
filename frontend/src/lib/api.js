@@ -5,14 +5,14 @@ const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
 
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 // Request interceptor - add auth token
 api.interceptors.request.use(
   (config) => {
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
+    }
     const token = localStorage.getItem("token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -73,6 +73,10 @@ export const customersAPI = {
     api.get(`/customers/${id}/timeline`, { params: { type, limit } }),
   getRiskHistory: (id, limit = 20) =>
     api.get(`/customers/${id}/risk-history`, { params: { limit } }),
+  getLeadInsights: (limit = 20) =>
+    api.get("/leads/insights", { params: { limit } }),
+  reviewRecommendation: (contextId, status) =>
+    api.patch(`/recommendations/${contextId}/review`, { status }),
   create: (data) => api.post("/customers", data),
   update: (id, data) => api.put(`/customers/${id}`, data),
   delete: (id) => api.delete(`/customers/${id}`),
@@ -102,22 +106,45 @@ export const settingsAPI = {
   update: (data) => api.put("/settings", data),
 };
 
-// Import API (CSV ingestion)
-const _uploadCSV = (url, file) => {
+// Import API (CSV/TXT ingestion)
+const _uploadFile = (url, file, metadata = {}) => {
   const formData = new FormData();
   formData.append("file", file);
-  return api.post(url, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+  Object.entries(metadata).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      formData.append(key, value);
+    }
   });
+  return api.post(url, formData);
 };
 
 export const importAPI = {
-  previewCustomers: (file) => _uploadCSV("/import/customers/preview", file),
-  importCustomers: (file) => _uploadCSV("/import/customers", file),
-  previewTransactions: (file) => _uploadCSV("/import/transactions/preview", file),
-  importTransactions: (file) => _uploadCSV("/import/transactions", file),
-  previewMessages: (file) => _uploadCSV("/import/messages/preview", file),
-  importMessages: (file) => _uploadCSV("/import/messages", file),
+  previewCustomers: (file) => _uploadFile("/import/customers/preview", file),
+  importCustomers: (file) => _uploadFile("/import/customers", file),
+  previewTransactions: (file) => _uploadFile("/import/transactions/preview", file),
+  importTransactions: (file) => _uploadFile("/import/transactions", file),
+  previewMessages: (file, metadata) => _uploadFile("/import/messages/preview", file, metadata),
+  importMessages: (file, metadata) => _uploadFile("/import/messages", file, metadata),
+  downloadTemplate: async (type) => {
+    const response = await api.get(`/import/template/${type}`, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    const disposition = response.headers["content-disposition"];
+    const fallbackName = ["customers", "transactions"].includes(type)
+      ? `template_${type}.xlsx`
+      : `template_${type}.csv`;
+    const filename = disposition
+      ? disposition.split('filename="')[1]?.replace('"', "") || fallbackName
+      : fallbackName;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 // ML Pipeline API
@@ -127,6 +154,7 @@ export const pipelineAPI = {
   processNLP: () => api.post("/pipeline/process-nlp"),
   generateFeatures: () => api.post("/pipeline/generate-features"),
   runScoring: () => api.post("/pipeline/run-scoring"),
+  generateRecommendations: () => api.post("/pipeline/generate-recommendations"),
   retrainModel: (data = {}) => api.post("/pipeline/retrain-model", data),
   getTask: (taskId) => api.get(`/admin/tasks/${taskId}`),
 };
@@ -137,4 +165,5 @@ export const modelAPI = {
   getFeatureImportance: () => api.get("/model/feature-importance"),
   getThresholdSensitivity: () => api.get("/model/threshold-sensitivity"),
   getRiskDistribution: () => api.get("/model/risk-distribution"),
+  getTopicEvaluation: () => api.get("/model/topic-evaluation"),
 };

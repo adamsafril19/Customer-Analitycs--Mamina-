@@ -130,6 +130,12 @@ class EmbeddingService:
     def is_model_loaded(self) -> bool:
         """Check if model is loaded"""
         return self.model is not None
+
+    def unload_model(self) -> None:
+        """Release encoder memory before another large NLP model is loaded."""
+        self.model = None
+        self.model_version = None
+        self.model_config_hash = None
     
     def encode(self, text: str) -> Optional[List[float]]:
         """

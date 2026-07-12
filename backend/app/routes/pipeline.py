@@ -82,6 +82,15 @@ def run_scoring():
     return _queue_task(run_scoring_task)
 
 
+@pipeline_bp.route("/pipeline/generate-recommendations", methods=["POST"])
+@jwt_required()
+@admin_required
+def generate_recommendations():
+    from app.tasks.pipeline_tasks import generate_recommendations_task
+
+    return _queue_task(generate_recommendations_task)
+
+
 @pipeline_bp.route("/pipeline/retrain-model", methods=["POST"])
 @jwt_required()
 @admin_required

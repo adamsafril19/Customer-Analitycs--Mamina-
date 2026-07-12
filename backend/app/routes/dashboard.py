@@ -187,13 +187,6 @@ def get_top_churn_drivers():
             for feature, data in sorted_drivers
         ]
         
-        if not drivers:
-            drivers = [
-                {"feature": "recency_days", "count": 0, "avg_contribution": 0.3},
-                {"feature": "complaint_rate_30d", "count": 0, "avg_contribution": 0.25},
-                {"feature": "tx_count_30d", "count": 0, "avg_contribution": 0.2}
-            ]
-        
         return jsonify({"success": True, "data": drivers}), 200
         
     except Exception as e:

@@ -23,6 +23,7 @@ from app.models.user import User
 from app.models.topic import Topic, ModelVersion, ShapCache
 from app.models.embedding_registry import EmbeddingModelRegistry
 from app.models.ml_registry import MLModelRegistry
+from app.models.recommendation_context import RecommendationContext
 
 __all__ = [
     "Customer",
@@ -41,7 +42,8 @@ __all__ = [
     "ModelVersion",
     "ShapCache",
     "EmbeddingModelRegistry",
-    "MLModelRegistry"
+    "MLModelRegistry",
+    "RecommendationContext",
 ]
 
 

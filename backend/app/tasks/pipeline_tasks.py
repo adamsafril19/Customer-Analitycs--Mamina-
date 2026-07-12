@@ -34,7 +34,11 @@ def process_nlp_task(self):
         from app.services.pipeline_service import PipelineService
 
         self.update_state(state="PROGRESS", meta={"progress": 10, "step": "process_nlp"})
-        result = PipelineService().process_nlp()
+        
+        def progress_cb(pct):
+            self.update_state(state="PROGRESS", meta={"progress": pct, "step": "process_nlp"})
+            
+        result = PipelineService().process_nlp(progress_callback=progress_cb)
         self.update_state(state="PROGRESS", meta={"progress": 100, "step": "process_nlp"})
         return result
 
@@ -47,7 +51,11 @@ def generate_features_task(self):
         from app.services.pipeline_service import PipelineService
 
         self.update_state(state="PROGRESS", meta={"progress": 10, "step": "generate_features"})
-        result = PipelineService().generate_features()
+        
+        def progress_cb(pct):
+            self.update_state(state="PROGRESS", meta={"progress": pct, "step": "generate_features"})
+            
+        result = PipelineService().generate_features(progress_callback=progress_cb)
         self.update_state(state="PROGRESS", meta={"progress": 100, "step": "generate_features"})
         return result
 
@@ -104,6 +112,8 @@ def train_topic_model_task(
             logger.info("Starting topic model training task: %s", " ".join(cmd))
             self.update_state(state="PROGRESS", meta={"progress": 20, "step": "train_topic_model"})
 
+            env = os.environ.copy()
+            env.setdefault("SKIP_ML_LOAD", "true")
             completed = subprocess.run(
                 cmd,
                 cwd=os.getcwd(),
@@ -111,6 +121,7 @@ def train_topic_model_task(
                 text=True,
                 timeout=1800,
                 check=False,
+                env=env,
             )
 
             if completed.returncode != 0:
@@ -142,8 +153,35 @@ def run_scoring_task(self):
         from app.services.pipeline_service import PipelineService
 
         self.update_state(state="PROGRESS", meta={"progress": 10, "step": "run_scoring"})
-        result = PipelineService().run_scoring()
+        
+        def progress_cb(pct):
+            self.update_state(state="PROGRESS", meta={"progress": pct, "step": "run_scoring"})
+            
+        result = PipelineService().run_scoring(progress_callback=progress_cb)
         self.update_state(state="PROGRESS", meta={"progress": 100, "step": "run_scoring"})
+        return result
+
+    return _run_with_app_context(_run)
+
+
+@celery_app.task(bind=True, name="pipeline.generate_recommendations")
+def generate_recommendations_task(self):
+    def _run():
+        from app.services.recommendation_service import RecommendationContextService
+
+        self.update_state(
+            state="PROGRESS",
+            meta={"progress": 10, "step": "generate_recommendations"},
+        )
+        
+        def progress_cb(pct):
+            self.update_state(state="PROGRESS", meta={"progress": pct, "step": "generate_recommendations"})
+            
+        result = RecommendationContextService().backfill_latest(progress_callback=progress_cb)
+        self.update_state(
+            state="PROGRESS",
+            meta={"progress": 100, "step": "generate_recommendations"},
+        )
         return result
 
     return _run_with_app_context(_run)
@@ -179,20 +217,31 @@ def retrain_model_task(self, cutoff_date: str = None, churn_window: int = 90, ob
         logger.info("Starting retrain task: %s", " ".join(cmd))
         env = os.environ.copy()
         env.setdefault("SKIP_ML_LOAD", "true")
-        env.setdefault("ENABLE_SHAP", "false")
+        # Retraining must produce an explainer bound to the promoted model.
+        # The previous false default made the frontend workflow incapable of
+        # ever producing customer-level SHAP explanations.
+        env.setdefault("ENABLE_SHAP", "true")
         completed = subprocess.run(
             cmd,
             cwd=os.getcwd(),
             env=env,
             capture_output=True,
             text=True,
-            timeout=1800,
+            timeout=7200,
             check=False,
         )
 
         if completed.returncode != 0:
             logger.error("Retrain failed: %s", completed.stderr)
             raise RuntimeError(completed.stderr[-2000:] or "Retrain model failed")
+
+        shap_path = os.path.join("models", "shap_explainer.pkl")
+        shap_available = os.path.exists(shap_path)
+        if env.get("ENABLE_SHAP", "true").lower() in {"1", "true", "yes"} and not shap_available:
+            raise RuntimeError(
+                "Retrain selesai tetapi artifact SHAP tidak terbentuk. "
+                "Model candidate tidak boleh dipakai tanpa explainer."
+            )
 
         ml_service = current_app.config.get("ML_SERVICE")
         if ml_service:
@@ -202,8 +251,9 @@ def retrain_model_task(self, cutoff_date: str = None, churn_window: int = 90, ob
         return {
             "success": True,
             "model_version": version,
-            "feature_schema_version": "v3.0.0",
+            "feature_schema_version": "v3.2.0",
             "training_date": datetime.utcnow().isoformat(),
+            "shap_available": shap_available,
             "status": "completed",
             "stdout": completed.stdout[-2000:],
         }

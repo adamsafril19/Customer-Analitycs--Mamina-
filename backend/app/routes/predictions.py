@@ -13,6 +13,7 @@ from app.models.customer import Customer
 from app.models.action import Action
 from app.models.prediction import ChurnPrediction
 from app.models.transaction import Transaction
+from app.models.recommendation_context import RecommendationContext
 from app.models.numeric_features import CustomerNumericFeatures
 from app.models.text_signals import CustomerTextSignals
 from app.models.topic import ShapCache
@@ -138,6 +139,7 @@ def list_predictions():
     feature_maps = {}
     latest_actions = {}
     last_visits = {}
+    recommendation_contexts = {}
     if customer_ids:
         feature_service = FeatureService()
         display_as_of_date = feature_service.get_default_as_of_date()
@@ -173,6 +175,14 @@ def list_predictions():
         last_visits = {
             customer_id: last_visit
             for customer_id, last_visit in tx_rows
+        }
+        recommendation_contexts = {
+            row.pred_id: row
+            for row in RecommendationContext.query.filter(
+                RecommendationContext.pred_id.in_(
+                    [prediction.pred_id for prediction in predictions]
+                )
+            ).all()
         }
 
     def _explanation_payload(prediction: ChurnPrediction):
@@ -301,7 +311,24 @@ def list_predictions():
         if recency_days is None and features:
             recency_days = features.recency_days
         urgency, urgency_label = _urgency(pred, recency_days, action)
-        recommendation = _recommendation(explanation.get("top_feature"), pred.churn_label)
+        context = recommendation_contexts.get(pred.pred_id)
+        recommendation = (
+            {
+                "action_type": context.recommended_action_type,
+                "label": context.title,
+                "notes": context.rationale,
+                "priority": context.priority,
+                "reason_codes": context.reason_codes or [],
+                "details": context.recommendation_details or {},
+                "context_status": context.context_status,
+                "context_id": str(context.context_id),
+            }
+            if context
+            else _recommendation(
+                explanation.get("top_feature"),
+                pred.churn_label,
+            )
+        )
 
         item["customer_name"] = customer.name if customer else str(pred.customer_id)
         item["customer_city"] = customer.city if customer else None
@@ -312,6 +339,7 @@ def list_predictions():
         item["urgency"] = urgency
         item["urgency_label"] = urgency_label
         item["recommended_action"] = recommendation
+        item["recommendation_context"] = context.to_dict() if context else None
         item["latest_action"] = action.to_dict() if action else None
         item["work_status"] = action.status if action else "not_started"
         item.update(explanation)

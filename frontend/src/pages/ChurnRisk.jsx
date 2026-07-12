@@ -261,9 +261,6 @@ function ChurnRisk() {
                         <p className="leading-snug">
                           {prediction.customer_name || prediction.customer_id}
                         </p>
-                        <p className="text-xs font-normal text-stone-500">
-                          {prediction.customer_city || "Kota belum tersedia"}
-                        </p>
                       </div>
                     </Table.Cell>
 
@@ -414,9 +411,6 @@ function ChurnRisk() {
                       </div>
                       <p className="font-semibold text-primary-900 leading-snug">
                         {prediction.customer_name || prediction.customer_id}
-                      </p>
-                      <p className="text-xs text-stone-500">
-                        {prediction.customer_city || "Kota belum tersedia"}
                       </p>
                     </div>
 

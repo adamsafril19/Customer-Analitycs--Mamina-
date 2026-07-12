@@ -1,5 +1,5 @@
 """
-Feature Engineering Service — v3.0.0 (Smoothed Trend + Magnitude + Volatility)
+Feature Engineering Service — v3.2.0 (Gated Communication Availability)
 
 DESIGN PRINCIPLES (3 dimensi perilaku):
   1. TREND      — Arah perubahan aktivitas (smoothed, de-noised)
@@ -16,7 +16,9 @@ KEY CHANGES from v2:
   - NEW: activity_mean, recent_activity_avg (Magnitude)
   - NEW: activity_std, activity_cv, spend_volatility_cv (Volatility)
   - NEW: trend_magnitude_interaction (Interaction)
-  - Configurable parameters via FeatureConfig (structured, not .env)
+  - NEW v3.1: homecare_tx_ratio_90d, last_tx_is_homecare (Channel mix)
+  - NEW v3.1: zero_amount_tx_count_90d (Transaction quality)
+  - NEW v3.1: lifetime_tx_count (Lifetime value)
 
 Features must be:
   - Temporal-safe (no future leakage)
@@ -56,7 +58,7 @@ class FeatureService:
     """
     Feature Engineering Service (Behavioral Risk Scoring v3)
 
-    Output: 20 features = Trend(5) + Context(5) + Magnitude(2) + Volatility(3) + Interaction(1) + NLP(4)
+    Output: 25 features (schema v3.2.0).
 
     Configuration:
         config = FeatureConfig()  # defaults
@@ -95,10 +97,18 @@ class FeatureService:
         ("complaint_ratio", "numeric"),                # complaint messages / total messages 30d
         ("msg_volatility", "numeric"),                 # std dev of daily message count
         ("response_delay_mean", "numeric"),            # mean admin response time (seconds)
+        ("has_communication_90d", "numeric"),           # trusted inbound message exists in 90d
+        # === TRANSACTION CHANNEL MIX ===
+        ("homecare_tx_ratio_90d", "numeric"),           # fraction of homecare tx in 90 days
+        ("last_tx_is_homecare", "numeric"),             # 1 if last tx was homecare, 0 otherwise
+        # === TRANSACTION QUALITY ===
+        ("zero_amount_tx_count_90d", "numeric"),         # count of completed tx with amount = 0
+        # === LIFETIME VALUE ===
+        ("lifetime_tx_count", "numeric"),               # total completed tx from inception to as_of
     ]
 
     # Schema version — increment when feature set changes
-    FEATURE_SCHEMA_VERSION = "v3.0.0"
+    FEATURE_SCHEMA_VERSION = "v3.2.0"
 
     def __init__(self, config: Optional[FeatureConfig] = None):
         """
@@ -148,20 +158,70 @@ class FeatureService:
 
         return max(candidates) if candidates else date.today()
 
+    @staticmethod
+    def _lookback_start(as_of_date: date, days: int) -> datetime:
+        """Inclusive start for an exact N-calendar-day window ending at as_of."""
+        return datetime.combine(
+            as_of_date - timedelta(days=days - 1),
+            datetime.min.time(),
+        )
+
+    @classmethod
+    def _window_bounds(
+        cls,
+        as_of_date: date,
+        window_idx: int,
+        window_size_days: int,
+    ) -> tuple[datetime, datetime]:
+        """Return non-overlapping inclusive bounds; index 0 is the newest window."""
+        window_end_date = as_of_date - timedelta(
+            days=window_idx * window_size_days
+        )
+        window_start_date = window_end_date - timedelta(
+            days=window_size_days - 1
+        )
+        return (
+            datetime.combine(window_start_date, datetime.min.time()),
+            datetime.combine(window_end_date, datetime.max.time()),
+        )
+
     # =========================================================================
     # PUBLIC API — Feature Persistence (writes to DB, same schema as before)
     # =========================================================================
 
-    def populate_all_features(self, customer_id: str, as_of_date: Optional[date] = None) -> Dict[str, Any]:
+    def populate_all_features(
+        self,
+        customer_id: str,
+        as_of_date: Optional[date] = None,
+        commit: bool = True,
+    ) -> Dict[str, Any]:
         """Populate all ML feature tables"""
         if as_of_date is None:
             as_of_date = self.get_default_as_of_date()
-        return {
-            "numeric_features": self.populate_numeric_features(customer_id, as_of_date),
-            "text_signals": self.populate_text_signals(customer_id, as_of_date)
+        result = {
+            "numeric_features": self.populate_numeric_features(
+                customer_id,
+                as_of_date,
+                commit=False,
+            ),
+            "text_signals": self.populate_text_signals(
+                customer_id,
+                as_of_date,
+                commit=False,
+            ),
         }
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        return result
 
-    def populate_numeric_features(self, customer_id: str, as_of_date: Optional[date] = None) -> CustomerNumericFeatures:
+    def populate_numeric_features(
+        self,
+        customer_id: str,
+        as_of_date: Optional[date] = None,
+        commit: bool = True,
+    ) -> CustomerNumericFeatures:
         """
         Calculate and persist transaction features to DB.
 
@@ -181,8 +241,8 @@ class FeatureService:
             db.session.add(feature)
 
         as_of_dt = datetime.combine(as_of_date, datetime.max.time())
-        thirty_days_ago = datetime.combine(as_of_date - timedelta(days=30), datetime.min.time())
-        ninety_days_ago = datetime.combine(as_of_date - timedelta(days=90), datetime.min.time())
+        thirty_days_ago = self._lookback_start(as_of_date, 30)
+        ninety_days_ago = self._lookback_start(as_of_date, 90)
 
         # === RAW TRANSACTION SIGNALS ===
         last_tx = db.session.query(func.max(Transaction.tx_date)).filter(
@@ -221,15 +281,61 @@ class FeatureService:
         else:
             feature.tenure_days = 0
 
+        # === v3.1: TRANSACTION CHANNEL MIX ===
+        # Homecare vs outlet ratio in 90d (temporal-safe, from tx table)
+        homecare_count_90d = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            func.lower(func.trim(Transaction.service_type)) == "homecare",
+            Transaction.tx_date >= ninety_days_ago, Transaction.tx_date <= as_of_dt
+        ).scalar() or 0
+        feature.homecare_tx_ratio_90d = (
+            homecare_count_90d / feature.tx_count_90d if feature.tx_count_90d else 0.0
+        )
+
+        last_tx_row = db.session.query(Transaction.service_type).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.tx_date <= as_of_dt
+        ).order_by(Transaction.tx_date.desc(), Transaction.tx_id.desc()).first()
+        feature.last_tx_is_homecare = (
+            1.0
+            if last_tx_row and (last_tx_row.service_type or "").strip().lower() == "homecare"
+            else 0.0
+        )
+
+        # === v3.1: TRANSACTION QUALITY ===
+        feature.zero_amount_tx_count_90d = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.amount == 0,
+            Transaction.tx_date >= ninety_days_ago, Transaction.tx_date <= as_of_dt
+        ).scalar() or 0
+
+        # === v3.1: LIFETIME VALUE ===
+        feature.lifetime_tx_count = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.tx_date <= as_of_dt
+        ).scalar() or 0
+
         # === DERIVED RFM (Dashboard only — NOT in ML feature vector) ===
         feature.r_score = round(max(0.0, 5.0 - (feature.recency_days / 36.0)), 2)
         feature.f_score = round(min(5.0, float(feature.tx_count_90d or 0) / 2), 2)
         feature.m_score = round(min(5.0, (feature.spend_90d or 0) / 1_000_000), 2)
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return feature
 
-    def populate_text_signals(self, customer_id: str, as_of_date: Optional[date] = None) -> CustomerTextSignals:
+    def populate_text_signals(
+        self,
+        customer_id: str,
+        as_of_date: Optional[date] = None,
+        commit: bool = True,
+    ) -> CustomerTextSignals:
         """
         Behavioral signals from text (ML sees).
         Uses trusted links only. NO embedding.
@@ -237,8 +343,8 @@ class FeatureService:
         if as_of_date is None:
             as_of_date = self.get_default_as_of_date()
 
-        thirty_days_ago = as_of_date - timedelta(days=30)
-        seven_days_ago = as_of_date - timedelta(days=7)
+        thirty_days_ago = as_of_date - timedelta(days=29)
+        seven_days_ago = as_of_date - timedelta(days=6)
         end_dt = datetime.combine(as_of_date, datetime.max.time())
         start_dt_30 = datetime.combine(thirty_days_ago, datetime.min.time())
         start_dt_7 = datetime.combine(seven_days_ago, datetime.min.time())
@@ -258,6 +364,7 @@ class FeatureService:
         ).filter(
             FeedbackLinked.customer_id == customer_id,
             FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+            FeedbackRaw.direction == "inbound",
             FeedbackRaw.timestamp >= start_dt_30,
             FeedbackRaw.timestamp <= end_dt
         ).all()
@@ -274,7 +381,14 @@ class FeatureService:
             lengths = [f.msg_length for f in features_30d if f.msg_length]
             signals.avg_msg_length_30d = float(np.mean(lengths)) if lengths else 0.0
 
-            delays = [f.response_time_secs for f in features_30d if f.response_time_secs]
+            delays = [
+                feature.response_time_secs
+                for feature, raw in trusted_rows
+                if feature.response_time_secs is not None
+                and raw.timestamp
+                + timedelta(seconds=feature.response_time_secs)
+                <= end_dt
+            ]
             signals.response_delay_mean = float(np.mean(delays)) if delays else 0.0
 
             daily_counts = {}
@@ -294,7 +408,10 @@ class FeatureService:
             signals.response_delay_mean = 0.0
             signals.msg_volatility = 0.0
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return signals
 
     # =========================================================================
@@ -303,7 +420,7 @@ class FeatureService:
 
     def get_ml_feature_vector(self, customer_id: str, as_of_date: Optional[date] = None) -> Optional[List[float]]:
         """
-        Assemble 20-feature vector for ML (v3 risk scoring).
+        Assemble 25-feature vector for ML (v3.2 gated risk scoring).
 
         Reads persisted base features + computes derived features on-the-fly.
         """
@@ -333,6 +450,7 @@ class FeatureService:
         tx_series = self._compute_windowed_series(customer_id, as_of_date, metric="tx_count")
         spend_series = self._compute_windowed_series(customer_id, as_of_date, metric="spend")
         msg_series = self._compute_windowed_msg_series(customer_id, as_of_date)
+        has_communication_90d = float(sum(msg_series) > 0)
 
         # === SMOOTHING ===
         tx_smoothed = self._apply_smoothing(tx_series)
@@ -381,6 +499,14 @@ class FeatureService:
             signals.complaint_rate_30d or 0.0 if signals else 0.0,
             signals.msg_volatility or 0.0 if signals else 0.0,
             signals.response_delay_mean or 0.0 if signals else 0.0,
+            has_communication_90d,
+            # === v3.1: TRANSACTION CHANNEL MIX ===
+            float(numeric.homecare_tx_ratio_90d or 0.0),
+            float(numeric.last_tx_is_homecare or 0.0),
+            # === v3.1: TRANSACTION QUALITY ===
+            float(numeric.zero_amount_tx_count_90d or 0),
+            # === v3.1: LIFETIME VALUE ===
+            float(numeric.lifetime_tx_count or 0),
         ]
 
     def get_ml_feature_dict(self, customer_id: str, as_of_date: Optional[date] = None) -> Optional[Dict[str, float]]:
@@ -414,7 +540,6 @@ class FeatureService:
         trusted_feedback = FeedbackLinked.query.filter(
             FeedbackLinked.customer_id == customer_id,
             FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
-            FeedbackLinked.linked_at <= as_of
         )
         trusted_count = trusted_feedback.count()
 
@@ -431,8 +556,11 @@ class FeatureService:
         cfg = self.config
         total_lookback = cfg.total_lookback_days  # e.g., 90 days for 3 windows × 30d
 
-        thirty_days_ago = datetime.combine(as_of_date - timedelta(days=cfg.window_size_days), datetime.min.time())
-        lookback_start = datetime.combine(as_of_date - timedelta(days=total_lookback), datetime.min.time())
+        thirty_days_ago = self._lookback_start(
+            as_of_date,
+            cfg.window_size_days,
+        )
+        lookback_start = self._lookback_start(as_of_date, total_lookback)
 
         # === TRANSACTION FEATURES ===
         last_tx = db.session.query(func.max(Transaction.tx_date)).filter(
@@ -459,6 +587,45 @@ class FeatureService:
         ).first()
         tenure_days = (as_of_date - customer.created_at.date()).days if customer and customer.created_at else 0
 
+        # === v3.1: TRANSACTION CHANNEL MIX (temporal-safe) ===
+        ninety_days_ago_vf = self._lookback_start(as_of_date, 90)
+        homecare_count_90d_vf = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            func.lower(func.trim(Transaction.service_type)) == "homecare",
+            Transaction.tx_date >= ninety_days_ago_vf,
+            Transaction.tx_date <= as_of_dt,
+        ).scalar() or 0
+        homecare_tx_ratio_90d = homecare_count_90d_vf / tx_count_90d if tx_count_90d else 0.0
+
+        last_tx_row_vf = db.session.query(Transaction.service_type).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.tx_date <= as_of_dt,
+        ).order_by(Transaction.tx_date.desc(), Transaction.tx_id.desc()).first()
+        last_tx_is_homecare = (
+            1.0
+            if last_tx_row_vf
+            and (last_tx_row_vf.service_type or "").strip().lower() == "homecare"
+            else 0.0
+        )
+
+        # === v3.1: TRANSACTION QUALITY (temporal-safe) ===
+        zero_amount_tx_count_90d = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.amount == 0,
+            Transaction.tx_date >= ninety_days_ago_vf,
+            Transaction.tx_date <= as_of_dt,
+        ).scalar() or 0
+
+        # === v3.1: LIFETIME VALUE (temporal-safe) ===
+        lifetime_tx_count = db.session.query(func.count(Transaction.tx_id)).filter(
+            Transaction.customer_id == customer_id,
+            Transaction.status == "completed",
+            Transaction.tx_date <= as_of_dt,
+        ).scalar() or 0
+
         # === AVG INTERPURCHASE TIME ===
         avg_ipt = self._compute_avg_interpurchase_days(customer_id, as_of_dt)
 
@@ -466,6 +633,7 @@ class FeatureService:
         tx_series = self._compute_windowed_series(customer_id, as_of_date, metric="tx_count")
         spend_series = self._compute_windowed_series(customer_id, as_of_date, metric="spend")
         msg_series = self._compute_windowed_msg_series_verified(customer_id, as_of_date)
+        has_communication_90d = float(sum(msg_series) > 0)
 
         # === SMOOTHING ===
         tx_smoothed = self._apply_smoothing(tx_series)
@@ -494,6 +662,7 @@ class FeatureService:
         ).filter(
             FeedbackLinked.customer_id == customer_id,
             FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+            FeedbackRaw.direction == "inbound",
             FeedbackRaw.timestamp >= thirty_days_ago,
             FeedbackRaw.timestamp <= as_of_dt
         ).order_by(FeedbackFeatures.feature_id).all()
@@ -504,7 +673,13 @@ class FeatureService:
             complaint_count = len([f for f, _ in trusted_features_current if f.has_complaint])
             complaint_ratio = complaint_count / msg_count_30d
 
-            delays = [f.response_time_secs for f, _ in trusted_features_current if f.response_time_secs]
+            delays = [
+                f.response_time_secs
+                for f, raw in trusted_features_current
+                if f.response_time_secs is not None
+                and raw.timestamp + timedelta(seconds=f.response_time_secs)
+                <= as_of_dt
+            ]
             response_delay_mean = float(np.mean(delays)) if delays else 0.0
 
             daily_counts = {}
@@ -549,6 +724,14 @@ class FeatureService:
             "complaint_ratio": complaint_ratio,
             "msg_volatility": msg_volatility,
             "response_delay_mean": response_delay_mean,
+            "has_communication_90d": has_communication_90d,
+            # v3.1: Channel mix
+            "homecare_tx_ratio_90d": homecare_tx_ratio_90d,
+            "last_tx_is_homecare": last_tx_is_homecare,
+            # v3.1: Transaction quality
+            "zero_amount_tx_count_90d": float(zero_amount_tx_count_90d),
+            # v3.1: Lifetime value
+            "lifetime_tx_count": float(lifetime_tx_count),
         }
 
         # === ENFORCED ORDER from FEATURE_SCHEMA ===
@@ -688,11 +871,11 @@ class FeatureService:
         for i in range(cfg.activity_windows):
             # Windows are indexed from oldest (i=0) to newest (i=N-1)
             window_idx = cfg.activity_windows - 1 - i
-            window_end_date = as_of_date - timedelta(days=window_idx * cfg.window_size_days)
-            window_start_date = window_end_date - timedelta(days=cfg.window_size_days)
-
-            window_start = datetime.combine(window_start_date, datetime.min.time())
-            window_end = datetime.combine(window_end_date, datetime.max.time())
+            window_start, window_end = self._window_bounds(
+                as_of_date,
+                window_idx,
+                cfg.window_size_days,
+            )
 
             if metric == "tx_count":
                 value = db.session.query(func.count(Transaction.tx_id)).filter(
@@ -735,11 +918,11 @@ class FeatureService:
 
         for i in range(cfg.activity_windows):
             window_idx = cfg.activity_windows - 1 - i
-            window_end_date = as_of_date - timedelta(days=window_idx * cfg.window_size_days)
-            window_start_date = window_end_date - timedelta(days=cfg.window_size_days)
-
-            window_start = datetime.combine(window_start_date, datetime.min.time())
-            window_end = datetime.combine(window_end_date, datetime.max.time())
+            window_start, window_end = self._window_bounds(
+                as_of_date,
+                window_idx,
+                cfg.window_size_days,
+            )
 
             count = db.session.query(func.count(FeedbackFeatures.feature_id)).join(
                 FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
@@ -748,6 +931,7 @@ class FeatureService:
             ).filter(
                 FeedbackLinked.customer_id == customer_id,
                 FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+                FeedbackRaw.direction == "inbound",
                 FeedbackRaw.timestamp >= window_start,
                 FeedbackRaw.timestamp <= window_end
             ).scalar() or 0
@@ -769,11 +953,11 @@ class FeatureService:
 
         for i in range(cfg.activity_windows):
             window_idx = cfg.activity_windows - 1 - i
-            window_end_date = as_of_date - timedelta(days=window_idx * cfg.window_size_days)
-            window_start_date = window_end_date - timedelta(days=cfg.window_size_days)
-
-            window_start = datetime.combine(window_start_date, datetime.min.time())
-            window_end = datetime.combine(window_end_date, datetime.max.time())
+            window_start, window_end = self._window_bounds(
+                as_of_date,
+                window_idx,
+                cfg.window_size_days,
+            )
 
             count = db.session.query(func.count(FeedbackFeatures.feature_id)).join(
                 FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
@@ -782,6 +966,7 @@ class FeatureService:
             ).filter(
                 FeedbackLinked.customer_id == customer_id,
                 FeedbackLinked.link_status.in_(LINK_STATUS_FOR_ML),
+                FeedbackRaw.direction == "inbound",
                 FeedbackRaw.timestamp >= window_start,
                 FeedbackRaw.timestamp <= window_end
             ).scalar() or 0
@@ -1013,6 +1198,10 @@ class FeatureService:
 
                 if prior_sem and prior_sem.avg_sentiment_score is not None:
                     prior_score = float(prior_sem.avg_sentiment_score)
+                else:
+                    # Without a previous snapshot there is no evidence of
+                    # change. Keep trend neutral instead of duplicating level.
+                    prior_score = avg_score
             elif os.getenv("ENABLE_LIVE_SENTIMENT_FEATURES", "").lower() in {"1", "true", "yes"}:
                 avg_score, prior_score = self._compute_live_sentiment(customer_id, as_of_date)
 
@@ -1037,8 +1226,11 @@ class FeatureService:
                     return 0.0, 0.0
 
             end_dt = datetime.combine(as_of_date, datetime.max.time())
-            thirty_ago = datetime.combine(as_of_date - timedelta(days=30), datetime.min.time())
-            sixty_ago = datetime.combine(as_of_date - timedelta(days=60), datetime.min.time())
+            thirty_ago = self._lookback_start(as_of_date, 30)
+            sixty_ago = self._lookback_start(
+                as_of_date - timedelta(days=30),
+                30,
+            )
             thirty_ago_end = datetime.combine(as_of_date - timedelta(days=30), datetime.max.time())
 
             def _avg_sentiment_for_period(start, end):

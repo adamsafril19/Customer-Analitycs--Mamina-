@@ -13,11 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-ENV PIP_DEFAULT_TIMEOUT=120 \
+ENV PIP_DEFAULT_TIMEOUT=300 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_RETRIES=10
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --user --timeout 120 --retries 10 -r requirements.txt
+    pip install --user --timeout 300 --retries 10 -r requirements.txt
 
 
 # Runtime stage. Code-only rebuilds should usually start here from cached deps.
@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash appuser
 
-COPY --from=deps /root/.local /home/appuser/.local
+COPY --from=deps --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Make sure scripts in .local are usable
 ENV PATH=/home/appuser/.local/bin:$PATH
@@ -46,8 +46,10 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 COPY --chown=appuser:appuser . .
 
 # Create directories
-RUN mkdir -p /app/logs /app/models /app/.cache/huggingface \
-    && chown -R appuser:appuser /app /home/appuser/.local
+RUN install -d -o appuser -g appuser \
+    /app/logs \
+    /app/models \
+    /app/.cache/huggingface
 
 # Switch to non-root user
 USER appuser

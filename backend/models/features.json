@@ -19,7 +19,12 @@
     "avg_sentiment_score",
     "complaint_ratio",
     "msg_volatility",
-    "response_delay_mean"
+    "response_delay_mean",
+    "has_communication_90d",
+    "homecare_tx_ratio_90d",
+    "last_tx_is_homecare",
+    "zero_amount_tx_count_90d",
+    "lifetime_tx_count"
   ],
   "feature_descriptions": {
     "recency_ratio": "Rasio recency terhadap baseline personal (recency_days / avg_ipt)",
@@ -41,13 +46,16 @@
     "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
     "complaint_ratio": "Rasio pesan komplain 30 hari (0-1)",
     "msg_volatility": "Volatilitas pola pesan harian (std dev)",
-    "response_delay_mean": "Rata-rata waktu respons admin (detik)"
+    "response_delay_mean": "Rata-rata waktu respons admin (detik)",
+    "has_communication_90d": "Indikator pesan inbound trusted tersedia dalam 90 hari",
+    "homecare_tx_ratio_90d": "Rasio transaksi homecare dalam 90 hari (0-1)",
+    "last_tx_is_homecare": "Flag: transaksi terakhir bertipe homecare (0 atau 1)",
+    "zero_amount_tx_count_90d": "Jumlah transaksi selesai dengan nominal Rp 0 dalam 90 hari",
+    "lifetime_tx_count": "Total transaksi selesai sepanjang masa sampai tanggal observasi"
   },
-  "expected_shape": 20,
-  "model_type": "multimodal_behavioral_risk",
-  "neutralized_model_features": [
-    "tenure_days"
-  ],
-  "version": "v20260602_123429",
-  "trained_at": "2026-06-02T12:40:25.505923"
+  "expected_shape": 25,
+  "model_type": "gated_transaction_xgb_logistic",
+  "neutralized_model_features": [],
+  "version": "v20260707_211306",
+  "trained_at": "2026-07-07T21:25:45.027925"
 }

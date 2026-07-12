@@ -10,7 +10,7 @@ import {
   Cell,
 } from "recharts";
 import { FEATURE_LABELS } from "../../lib/utils";
-import { Flower2 } from "lucide-react";
+import { BarChart3, Flower2 } from "lucide-react";
 
 const COLORS = ["#f97316", "#ec4899", "#a855f7", "#06b6d4", "#84cc16"];
 
@@ -54,37 +54,49 @@ function TopDriversChart({ data }) {
         Faktor Utama Risiko
       </h3>
       <div className="h-[300px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={formattedData}
-            layout="vertical"
-            margin={{ left: 20, right: 20 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#f3e8ff" horizontal={false} />
-            <XAxis
-              type="number"
-              domain={[0, "auto"]}
-              tick={{ fontSize: 12, fill: "#a8a29e" }}
-              tickLine={false}
-              axisLine={{ stroke: "#e9d5ff" }}
-              tickFormatter={(value) => `${value}%`}
-            />
-            <YAxis
-              dataKey="label"
-              type="category"
-              tick={{ fontSize: 12, fill: "#a8a29e" }}
-              tickLine={false}
-              axisLine={false}
-              width={150}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Bar dataKey="impact" radius={[0, 8, 8, 0]} barSize={32}>
-              {formattedData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        {formattedData.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <BarChart3 className="mb-3 h-9 w-9 text-stone-300" />
+            <p className="text-sm font-semibold text-stone-700">
+              Faktor risiko belum tersedia
+            </p>
+            <p className="mt-1 max-w-xs text-sm text-stone-500">
+              Data akan tampil setelah risk scoring menghasilkan penjelasan SHAP.
+            </p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={formattedData}
+              layout="vertical"
+              margin={{ left: 20, right: 20 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f3e8ff" horizontal={false} />
+              <XAxis
+                type="number"
+                domain={[0, "auto"]}
+                tick={{ fontSize: 12, fill: "#a8a29e" }}
+                tickLine={false}
+                axisLine={{ stroke: "#e9d5ff" }}
+                tickFormatter={(value) => `${value}%`}
+              />
+              <YAxis
+                dataKey="label"
+                type="category"
+                tick={{ fontSize: 12, fill: "#a8a29e" }}
+                tickLine={false}
+                axisLine={false}
+                width={150}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Bar dataKey="impact" radius={[0, 8, 8, 0]} barSize={32}>
+                {formattedData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

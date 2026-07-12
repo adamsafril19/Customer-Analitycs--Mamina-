@@ -1,0 +1,179 @@
+{
+  "feature_names": [
+    "recency_ratio",
+    "frequency_trend_smoothed",
+    "spend_trend_smoothed",
+    "msg_trend_smoothed",
+    "sentiment_trend",
+    "recency_days",
+    "tx_count_90d",
+    "spend_90d",
+    "avg_tx_value",
+    "tenure_days",
+    "activity_mean",
+    "recent_activity_avg",
+    "activity_std",
+    "activity_cv",
+    "spend_volatility_cv",
+    "trend_magnitude_interaction",
+    "avg_sentiment_score",
+    "complaint_ratio",
+    "msg_volatility",
+    "response_delay_mean",
+    "has_communication_90d",
+    "homecare_tx_ratio_90d",
+    "last_tx_is_homecare",
+    "zero_amount_tx_count_90d",
+    "lifetime_tx_count"
+  ],
+  "feature_descriptions": {
+    "recency_ratio": "Rasio recency terhadap baseline personal (recency_days / avg_ipt)",
+    "frequency_trend_smoothed": "Slope tren frekuensi transaksi (smoothed, de-noised)",
+    "spend_trend_smoothed": "Slope tren belanja (smoothed, de-noised)",
+    "msg_trend_smoothed": "Slope tren komunikasi (smoothed, de-noised)",
+    "sentiment_trend": "Perubahan sentimen (30d - prior_30d)",
+    "recency_days": "Hari sejak transaksi terakhir",
+    "tx_count_90d": "Jumlah transaksi dalam 90 hari",
+    "spend_90d": "Total belanja dalam 90 hari",
+    "avg_tx_value": "Rata-rata nilai transaksi (spend_90d / tx_count_90d)",
+    "tenure_days": "Lama menjadi customer (hari)",
+    "activity_mean": "Rata-rata tx count per window (3 windows x 30d)",
+    "recent_activity_avg": "Tx count di window terkini (30d terakhir)",
+    "activity_std": "Standar deviasi tx count antar window",
+    "activity_cv": "Koefisien variasi aktivitas (std/mean, capped, zero-safe)",
+    "spend_volatility_cv": "Koefisien variasi belanja antar window",
+    "trend_magnitude_interaction": "frequency_trend_smoothed x activity_mean",
+    "avg_sentiment_score": "Rata-rata skor sentimen 30 hari",
+    "complaint_ratio": "Rasio pesan komplain 30 hari (0-1)",
+    "msg_volatility": "Volatilitas pola pesan harian (std dev)",
+    "response_delay_mean": "Rata-rata waktu respons admin (detik)",
+    "has_communication_90d": "Indikator pesan inbound trusted tersedia dalam 90 hari",
+    "homecare_tx_ratio_90d": "Rasio transaksi homecare dalam 90 hari (0-1)",
+    "last_tx_is_homecare": "Flag: transaksi terakhir bertipe homecare (0 atau 1)",
+    "zero_amount_tx_count_90d": "Jumlah transaksi selesai dengan nominal Rp 0 dalam 90 hari",
+    "lifetime_tx_count": "Total transaksi selesai sepanjang masa sampai tanggal observasi"
+  },
+  "feature_schema": [
+    [
+      "recency_ratio",
+      "numeric"
+    ],
+    [
+      "frequency_trend_smoothed",
+      "numeric"
+    ],
+    [
+      "spend_trend_smoothed",
+      "numeric"
+    ],
+    [
+      "msg_trend_smoothed",
+      "numeric"
+    ],
+    [
+      "sentiment_trend",
+      "numeric"
+    ],
+    [
+      "recency_days",
+      "numeric"
+    ],
+    [
+      "tx_count_90d",
+      "numeric"
+    ],
+    [
+      "spend_90d",
+      "numeric"
+    ],
+    [
+      "avg_tx_value",
+      "numeric"
+    ],
+    [
+      "tenure_days",
+      "numeric"
+    ],
+    [
+      "activity_mean",
+      "numeric"
+    ],
+    [
+      "recent_activity_avg",
+      "numeric"
+    ],
+    [
+      "activity_std",
+      "numeric"
+    ],
+    [
+      "activity_cv",
+      "numeric"
+    ],
+    [
+      "spend_volatility_cv",
+      "numeric"
+    ],
+    [
+      "trend_magnitude_interaction",
+      "numeric"
+    ],
+    [
+      "avg_sentiment_score",
+      "numeric"
+    ],
+    [
+      "complaint_ratio",
+      "numeric"
+    ],
+    [
+      "msg_volatility",
+      "numeric"
+    ],
+    [
+      "response_delay_mean",
+      "numeric"
+    ],
+    [
+      "has_communication_90d",
+      "numeric"
+    ],
+    [
+      "homecare_tx_ratio_90d",
+      "numeric"
+    ],
+    [
+      "last_tx_is_homecare",
+      "numeric"
+    ],
+    [
+      "zero_amount_tx_count_90d",
+      "numeric"
+    ],
+    [
+      "lifetime_tx_count",
+      "numeric"
+    ]
+  ],
+  "schema_version": "v3.2.0",
+  "schema_hash": "116751e406b9363f",
+  "expected_shape": 25,
+  "expected_count": 25,
+  "model_type": "gated_transaction_xgb_logistic",
+  "neutralized_model_features": [
+    "tenure_days",
+    "avg_sentiment_score",
+    "sentiment_trend",
+    "msg_trend_smoothed",
+    "complaint_ratio",
+    "msg_volatility",
+    "response_delay_mean",
+    "has_communication_90d"
+  ],
+  "version": "notebook_20260707_225038",
+  "trained_at": "2026-07-07T22:50:38.769525",
+  "train_samples": 8969,
+  "test_samples": 12381,
+  "smote_applied": false,
+  "scale_pos_weight": 0.6254077564334904
+}

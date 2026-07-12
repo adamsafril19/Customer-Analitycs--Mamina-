@@ -13,7 +13,6 @@ function CustomerTable({ customers }) {
       <Table.Header>
         <Table.Row>
           <Table.Head>Customer</Table.Head>
-          <Table.Head>Kota</Table.Head>
           <Table.Head>Kunjungan Terakhir</Table.Head>
           <Table.Head>Risk Score</Table.Head>
           <Table.Head>Status</Table.Head>
@@ -43,9 +42,6 @@ function CustomerTable({ customers }) {
                   </div>
                 </div>
               </div>
-            </Table.Cell>
-            <Table.Cell className="text-stone-500 font-medium">
-              {customer.city || "-"}
             </Table.Cell>
             <Table.Cell className="text-stone-500 font-medium">
               {formatRelativeTime(customer.last_visit)}

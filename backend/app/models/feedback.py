@@ -188,9 +188,15 @@ class FeedbackFeatures(db.Model):
     # Track model version for semantic continuity (like sentiment/topic)
     embedding_model_version = db.Column(db.String(100), nullable=True, index=True)
     
-    # Rule-based flags (regex patterns, NOT ML predictions)
+    # Rule-based flags (contextual deterministic rules, NOT ML predictions)
     has_complaint = db.Column(db.Boolean, nullable=True, default=False)
     has_refund_request = db.Column(db.Boolean, nullable=True, default=False)
+
+    # Per-message sentiment, derived by SentimentService for dashboard display.
+    sentiment_label = db.Column(db.String(20), nullable=True, index=True)
+    sentiment_score = db.Column(db.Float, nullable=True)
+    sentiment_model_version = db.Column(db.String(100), nullable=True, index=True)
+    sentiment_processed_at = db.Column(db.DateTime, nullable=True)
     
     language_confidence = db.Column(db.Float, nullable=True)
     response_time_secs = db.Column(db.Integer, nullable=True)
@@ -212,6 +218,13 @@ class FeedbackFeatures(db.Model):
             "num_questions": self.num_questions,
             "has_complaint": self.has_complaint,
             "has_refund_request": self.has_refund_request,
+            "sentiment_label": self.sentiment_label,
+            "sentiment_score": self.sentiment_score,
+            "sentiment_model_version": self.sentiment_model_version,
+            "sentiment_processed_at": (
+                self.sentiment_processed_at.isoformat()
+                if self.sentiment_processed_at else None
+            ),
             "language_confidence": self.language_confidence,
             "response_time_secs": self.response_time_secs,
             "has_embedding": self.embedding is not None,

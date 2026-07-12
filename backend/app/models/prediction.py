@@ -80,6 +80,12 @@ class ChurnPrediction(db.Model):
         uselist=False,
         cascade="all, delete-orphan"
     )
+    recommendation_context = db.relationship(
+        "RecommendationContext",
+        back_populates="prediction",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     
     # Indexes
     __table_args__ = (
@@ -92,7 +98,7 @@ class ChurnPrediction(db.Model):
     @staticmethod
     def score_to_label(score: float) -> str:
         """Convert churn score to label"""
-        if score < 0.40:
+        if score < 0.39:
             return "low"
         elif score < 0.90:
             return "medium"

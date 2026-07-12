@@ -1,0 +1,264 @@
+Table actions {
+  action_id uuid [pk]
+  pred_id uuid [ref: > churn_predictions.pred_id]
+  customer_id uuid [ref: > customers.customer_id]
+  action_type varchar(50)
+  priority varchar(20)
+  assigned_to varchar(120)
+  status varchar(20)
+  notes text
+  due_date date
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table alembic_version {
+  version_num varchar(32) [pk]
+}
+
+Table churn_labels {
+  label_id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  observation_date date
+  outcome_date date
+  is_churned boolean
+  days_to_next_tx integer
+  last_tx_before_obs date
+  labeled_at timestamp
+  label_method varchar(50)
+}
+
+Table churn_predictions {
+  pred_id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  churn_score double
+  churn_label varchar(20)
+  model_version varchar(50)
+  as_of_date date
+  created_at timestamp
+  features_used json
+  feature_as_of timestamp
+  feature_schema_hash varchar(64)
+  model_hash varchar(32)
+}
+
+Table customer_numeric_features {
+  feature_id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  as_of_date date
+  r_score double
+  f_score double
+  m_score double
+  tenure_days integer
+  created_at timestamp
+  recency_days integer
+  tx_count_30d integer
+  tx_count_90d integer
+  spend_30d double
+  spend_90d double
+  avg_tx_value double
+  homecare_tx_ratio_90d double
+  last_tx_is_homecare double
+  zero_amount_tx_count_90d integer
+  lifetime_tx_count integer
+}
+
+Table customer_text_semantics {
+  id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  as_of_date date
+  top_topic_counts jsonb
+  sentiment_dist jsonb
+  top_keywords jsonb
+  top_complaint_types jsonb
+  last_n_msg_ids jsonb
+  created_at timestamp
+  avg_sentiment_score double
+  avg_topic_similarity double
+  topic_model_version varchar(50)
+  sentiment_model_version varchar(100)
+}
+
+Table customer_text_signals {
+  id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  as_of_date date
+  msg_count_7d integer
+  msg_count_30d integer
+  msg_volatility double
+  avg_msg_length_30d double
+  complaint_rate_30d double
+  response_delay_mean double
+  avg_embedding vector(384)
+  embedding_count_30d integer
+  created_at timestamp
+}
+
+Table customers {
+  customer_id uuid [pk]
+  external_id varchar(256)
+  name varchar(200)
+  phone_hash varchar(256)
+  city varchar(100)
+  consent_given boolean
+  is_active boolean
+  created_at timestamp
+  last_seen_at timestamp
+  is_provisional boolean
+}
+
+Table feedback_features {
+  feature_id uuid [pk]
+  msg_id uuid [ref: - feedback_raw.msg_id]
+  customer_id uuid [ref: > customers.customer_id]
+  msg_length integer
+  num_exclamations integer
+  num_questions integer
+  has_complaint boolean
+  has_refund_request boolean
+  language_confidence double
+  response_time_secs integer
+  processed_at timestamp
+  embedding vector(384)
+  link_id uuid [ref: - feedback_linked.link_id]
+  embedding_model_version varchar(100)
+  sentiment_label varchar(20)
+  sentiment_score double
+  sentiment_model_version varchar(100)
+  sentiment_processed_at timestamp
+}
+
+Table feedback_linked {
+  link_id uuid [pk]
+  msg_id uuid [ref: - feedback_raw.msg_id]
+  customer_id uuid [ref: > customers.customer_id]
+  match_confidence double
+  match_method varchar(50)
+  linked_at timestamp
+  link_status varchar(20)
+}
+
+Table embedding_model_registry {
+  id uuid [pk]
+  model_name varchar(200)
+  model_version varchar(100)
+  model_hash varchar(50)
+  embedding_dim integer
+  is_active boolean
+  registered_at timestamp
+  notes text
+}
+
+Table feedback_raw {
+  msg_id uuid [pk]
+  direction varchar(20)
+  text text
+  timestamp timestamp
+  raw_meta jsonb
+  created_at timestamp
+  phone_number varchar(256)
+}
+
+Table ml_model_registry {
+  id uuid [pk]
+  model_name varchar(100)
+  model_version varchar(50)
+  model_hash varchar(64)
+  feature_schema_hash varchar(64)
+  feature_names jsonb
+  expected_feature_count integer
+  trained_on_embedding_model_hash varchar(50)
+  trained_on_link_status varchar(50)
+  training_data_count integer
+  training_date timestamp
+  shap_explainer_hash varchar(64)
+  is_active boolean
+  registered_at timestamp
+  notes text
+}
+
+Table model_versions {
+  model_version varchar(50) [pk]
+  model_path text
+  trained_at timestamp
+  metrics json
+  deployed boolean
+  notes text
+  created_at timestamp
+}
+
+Table recommendation_contexts {
+  context_id uuid [pk]
+  pred_id uuid [ref: - churn_predictions.pred_id]
+  customer_id uuid [ref: > customers.customer_id]
+  as_of_date date
+  context_status varchar(30)
+  sentiment_label varchar(20)
+  sentiment_score double
+  sentiment_trend double
+  dominant_topic_id varchar(50)
+  dominant_topic_name text
+  topic_similarity double
+  complaint_ratio double
+  message_count integer
+  last_message_at timestamp
+  evidence_messages jsonb
+  recommended_action_type varchar(50)
+  priority varchar(20)
+  title varchar(200)
+  rationale text
+  reason_codes jsonb
+  policy_version varchar(50)
+  risk_model_version varchar(50)
+  sentiment_model_version varchar(100)
+  topic_model_version varchar(100)
+  embedding_model_version varchar(100)
+  review_status varchar(20)
+  reviewed_by varchar(120)
+  reviewed_at timestamp
+  created_at timestamp
+  recommendation_details jsonb
+}
+
+Table shap_cache {
+  pred_id uuid [pk, ref: - churn_predictions.pred_id]
+  shap_values json
+  computed_at timestamp
+  explainer_version varchar(50)
+  shap_top json
+  nearest_messages json
+  feature_schema_hash varchar(64)
+  model_version varchar(50)
+  explanation_type varchar(20)
+  as_of timestamp
+}
+
+Table topics {
+  topic_id uuid [pk]
+  name text
+  top_keywords text[]
+  model_version varchar(50)
+  created_at timestamp
+  topic_idx integer
+}
+
+Table transactions {
+  tx_id uuid [pk]
+  customer_id uuid [ref: > customers.customer_id]
+  tx_date timestamp
+  service_type varchar(100)
+  amount decimal(12,2)
+  status varchar(20)
+  created_at timestamp
+}
+
+Table users {
+  user_id uuid [pk]
+  username varchar(80)
+  email varchar(120)
+  password_hash varchar(256)
+  role varchar(20)
+  is_active boolean
+  created_at timestamp
+  updated_at timestamp
+}

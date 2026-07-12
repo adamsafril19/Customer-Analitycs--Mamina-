@@ -22,7 +22,7 @@ export function usePipelineTask(taskId) {
     retry: 1,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status && ["SUCCESS", "FAILURE", "REVOKED"].includes(status) ? false : 3000;
+      return status && ["SUCCESS", "FAILURE", "REVOKED"].includes(status) ? false : 1000;
     },
   });
 
@@ -31,6 +31,7 @@ export function usePipelineTask(taskId) {
       queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
       queryClient.invalidateQueries({ queryKey: ["modelEvaluation"] });
       queryClient.invalidateQueries({ queryKey: ["riskDistribution"] });
+      queryClient.invalidateQueries({ queryKey: ["topicEvaluation"] });
     }
   }, [query.data?.status, queryClient]);
 
@@ -47,6 +48,7 @@ function usePipelineMutation(mutationFn, label) {
       queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
       queryClient.invalidateQueries({ queryKey: ["modelEvaluation"] });
       queryClient.invalidateQueries({ queryKey: ["riskDistribution"] });
+      queryClient.invalidateQueries({ queryKey: ["topicEvaluation"] });
     },
     onError: (err) => {
       const message = err.response?.data?.error || err.response?.data?.message || `${label} gagal dijalankan`;
@@ -69,6 +71,13 @@ export function useGenerateFeatures() {
 
 export function useRunScoring() {
   return usePipelineMutation(pipelineAPI.runScoring, "Generate Risk Scores");
+}
+
+export function useGenerateRecommendations() {
+  return usePipelineMutation(
+    pipelineAPI.generateRecommendations,
+    "Generate Recommendations"
+  );
 }
 
 export function useRetrainModel() {
@@ -104,5 +113,15 @@ export function useRiskDistribution() {
     queryKey: ["riskDistribution"],
     queryFn: () => modelAPI.getRiskDistribution().then((res) => res.data),
     staleTime: 60 * 1000,
+  });
+}
+
+export function useTopicEvaluation() {
+  return useQuery({
+    queryKey: ["topicEvaluation"],
+    queryFn: () => modelAPI.getTopicEvaluation().then((res) => res.data),
+    staleTime: 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 }

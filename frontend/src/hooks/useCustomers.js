@@ -27,6 +27,30 @@ export function useCustomer360(customerId) {
   });
 }
 
+export function useReviewRecommendation(customerId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contextId, status }) =>
+      customersAPI
+        .reviewRecommendation(contextId, status)
+        .then((res) => res.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["customer360", customerId],
+      });
+    },
+  });
+}
+
+export function useLeadInsights(limit = 20) {
+  return useQuery({
+    queryKey: ["leadInsights", limit],
+    queryFn: () =>
+      customersAPI.getLeadInsights(limit).then((res) => res.data),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useCustomerTimeline(
   customerId,
   type = "transactions",

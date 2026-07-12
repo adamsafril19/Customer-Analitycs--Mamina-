@@ -13,7 +13,11 @@ export function usePreviewCSV(type) {
   }[type];
 
   return useMutation({
-    mutationFn: (file) => previewFn(file).then((res) => res.data),
+    mutationFn: (payload) => {
+      const file = payload?.file || payload;
+      const metadata = payload?.metadata || {};
+      return previewFn(file, metadata).then((res) => res.data);
+    },
   });
 }
 
@@ -29,6 +33,10 @@ export function useImportCSV(type) {
   }[type];
 
   return useMutation({
-    mutationFn: (file) => importFn(file).then((res) => res.data),
+    mutationFn: (payload) => {
+      const file = payload?.file || payload;
+      const metadata = payload?.metadata || {};
+      return importFn(file, metadata).then((res) => res.data);
+    },
   });
 }

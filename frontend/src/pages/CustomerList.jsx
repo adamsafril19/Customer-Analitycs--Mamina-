@@ -21,7 +21,6 @@ function CustomerList() {
   // Get params from URL — default sort = risk_score DESC (prioritization)
   const search = searchParams.get("search") || "";
   const risk = searchParams.get("risk") || "";
-  const city = searchParams.get("city") || "";
   const sort = searchParams.get("sort") || "risk_score";
   const order = searchParams.get("order") || "desc";
   const page = parseInt(searchParams.get("page") || "1", 10);
@@ -49,7 +48,6 @@ function CustomerList() {
   const { data, isLoading, error } = useCustomers({
     search: debouncedSearch,
     risk_level: risk || undefined,
-    city: city || undefined,
     sort,
     order,
     page,
@@ -145,7 +143,7 @@ function CustomerList() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-400" />
             <input
               type="text"
-              placeholder="Cari nama atau kota..."
+              placeholder="Cari nama customer..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="input pl-10"

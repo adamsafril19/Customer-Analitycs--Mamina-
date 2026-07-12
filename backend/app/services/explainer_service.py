@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from app import db
 from app.models.topic import ShapCache
-from app.models.feedback import FeedbackFeatures
+from app.models.feedback import FeedbackFeatures, FeedbackRaw
 from app.services.shap_wrapper import coerce_numeric_array
 
 logger = logging.getLogger(__name__)
@@ -244,12 +244,14 @@ class ExplainerService:
                 
                 last_msg = db.session.query(FeedbackFeatures).join(
                     FeedbackLinked, FeedbackFeatures.link_id == FeedbackLinked.link_id
+                ).join(
+                    FeedbackRaw, FeedbackFeatures.msg_id == FeedbackRaw.msg_id
                 ).filter(
                     FeedbackLinked.customer_id == customer_id,
                     FeedbackLinked.link_status.in_(['verified', 'probable']),
                     FeedbackFeatures.embedding.isnot(None),
-                    FeedbackFeatures.processed_at <= as_of
-                ).order_by(FeedbackFeatures.processed_at.desc()).first()
+                    FeedbackRaw.timestamp <= as_of
+                ).order_by(FeedbackRaw.timestamp.desc()).first()
                 
                 if not last_msg or last_msg.embedding is None:
                     logger.warning(f"No embedding found for customer {customer_id}")
@@ -279,7 +281,7 @@ class ExplainerService:
                 WHERE fl.customer_id = :customer_id
                   AND fl.link_status IN ('verified', 'probable')
                   AND ff.embedding IS NOT NULL
-                  AND ff.processed_at <= :as_of
+                  AND fr.timestamp <= :as_of
                 ORDER BY ff.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)

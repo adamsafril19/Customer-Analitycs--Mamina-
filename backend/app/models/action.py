@@ -65,7 +65,7 @@ class Action(db.Model):
     # Valid statuses
     VALID_STATUSES = ["pending", "in_progress", "completed", "cancelled"]
     VALID_PRIORITIES = ["low", "medium", "high"]
-    VALID_ACTION_TYPES = ["call", "promo", "visit", "email"]
+    VALID_ACTION_TYPES = ["call", "promo", "visit", "email", "review"]
     
     def to_dict(self) -> dict:
         """Convert to dictionary representation"""

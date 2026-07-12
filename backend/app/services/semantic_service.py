@@ -17,13 +17,14 @@ import numpy as np
 from flask import current_app
 
 from app import db
-from app.models.feedback import FeedbackRaw, FeedbackLinked
+from app.models.feedback import FeedbackFeatures, FeedbackRaw, FeedbackLinked
 from app.models.text_semantics import CustomerTextSemantics
 
 logger = logging.getLogger(__name__)
 
 # Minimum match confidence for semantic aggregation
 MIN_CONFIDENCE = 0.7
+TRUSTED_LINK_STATUSES = ("verified", "probable")
 
 
 class SemanticService:
@@ -75,7 +76,10 @@ class SemanticService:
 
         if not self.topic_service.is_model_loaded():
             try:
-                self.topic_service.load_model(model_path=topic_model_path)
+                self.topic_service.load_model(
+                    model_path=topic_model_path,
+                    load_embedding_model=False,
+                )
             except Exception as exc:
                 if strict:
                     raise RuntimeError(f"Topic model is required but failed to load: {exc}") from exc
@@ -95,7 +99,7 @@ class SemanticService:
         if as_of_date is None:
             as_of_date = date.today()
         
-        thirty_days_ago = as_of_date - timedelta(days=30)
+        thirty_days_ago = as_of_date - timedelta(days=29)
         end_dt = datetime.combine(as_of_date, datetime.max.time())
         start_dt_30 = datetime.combine(thirty_days_ago, datetime.min.time())
         
@@ -110,17 +114,25 @@ class SemanticService:
             db.session.add(semantics)
         
         # CORRECT: Use FeedbackLinked to get raw messages with proper identity resolution
-        linked_messages = db.session.query(FeedbackRaw, FeedbackLinked).join(
+        linked_messages = db.session.query(
+            FeedbackRaw,
+            FeedbackLinked,
+            FeedbackFeatures,
+        ).join(
             FeedbackLinked, FeedbackRaw.msg_id == FeedbackLinked.msg_id
+        ).outerjoin(
+            FeedbackFeatures,
+            FeedbackLinked.link_id == FeedbackFeatures.link_id,
         ).filter(
             FeedbackLinked.customer_id == customer_id,
+            FeedbackLinked.link_status.in_(TRUSTED_LINK_STATUSES),
             FeedbackLinked.match_confidence >= MIN_CONFIDENCE,
             FeedbackRaw.timestamp >= start_dt_30,
             FeedbackRaw.timestamp <= end_dt,
             FeedbackRaw.direction == 'inbound'
         ).order_by(FeedbackRaw.timestamp.desc()).all()
         
-        raw_messages = [raw for raw, linked in linked_messages]
+        raw_messages = [raw for raw, _, _ in linked_messages]
         
         # Include timestamp for auditability (dashboard can verify "last 10" is same)
         semantics.last_n_msg_ids = [
@@ -144,13 +156,20 @@ class SemanticService:
         # === SENTIMENT (on-the-fly) ===
         sentiment_counts = Counter()
         sentiment_scores = []
-        for msg in raw_messages:
+        for msg, _, features in linked_messages:
             if msg.text:
                 try:
                     # Contract: returns (label, score) tuple
                     label, score = self.sentiment_service.predict(msg.text)
                     sentiment_counts[label] += 1
                     sentiment_scores.append(score)
+                    if features is not None:
+                        features.sentiment_label = label
+                        features.sentiment_score = score
+                        features.sentiment_model_version = (
+                            self.sentiment_service.get_model_version()
+                        )
+                        features.sentiment_processed_at = datetime.utcnow()
                 except Exception as e:
                     if strict:
                         raise RuntimeError(f"Sentiment failed for msg {msg.msg_id}: {e}") from e
@@ -165,13 +184,28 @@ class SemanticService:
         # === TOPIC (on-the-fly) ===
         topic_counts = Counter()
         topic_similarities = []  # NOTE: This is cosine similarity, NOT probability
-        texts = [msg.text for msg in raw_messages if msg.text]
-        if texts:
+        topic_rows = [
+            (raw.text, features.embedding)
+            for raw, _, features in linked_messages
+            if raw.text and features is not None and features.embedding is not None
+        ]
+        if strict and raw_messages and not topic_rows:
+            raise RuntimeError(
+                "No stored message embeddings available for topic inference."
+            )
+        if topic_rows:
             try:
                 # Contract: predict_batch returns list of (topic_idx, similarity) tuples
-                results = self.topic_service.predict_batch(texts)
+                topic_texts = [text for text, _ in topic_rows]
+                topic_embeddings = np.asarray(
+                    [embedding for _, embedding in topic_rows]
+                )
+                results = self.topic_service.predict_batch(
+                    topic_texts,
+                    embeddings=topic_embeddings,
+                )
                 for topic_id, similarity in results:
-                    if topic_id is not None:
+                    if self._is_assignable_topic(topic_id):
                         topic_counts[str(topic_id)] += 1
                         if similarity is not None:
                             topic_similarities.append(similarity)
@@ -180,8 +214,6 @@ class SemanticService:
                     raise RuntimeError(f"Topic prediction failed: {e}") from e
                 logger.warning(f"Topic prediction failed: {e}")
         semantics.top_topic_counts = dict(topic_counts.most_common(5)) if topic_counts else None
-        if strict and texts and not topic_counts:
-            raise RuntimeError("Topic model produced no topics for non-empty messages")
         # NOTE: This measures embedding clustering, NOT topic certainty
         semantics.avg_topic_similarity = float(np.mean(topic_similarities)) if topic_similarities else None
         # Store model version for semantic continuity
@@ -214,3 +246,8 @@ class SemanticService:
         
         db.session.commit()
         return semantics
+
+    @staticmethod
+    def _is_assignable_topic(topic_id) -> bool:
+        """Only persist real BERTopic clusters; -1 is the outlier label."""
+        return topic_id is not None and int(topic_id) != -1

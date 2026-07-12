@@ -80,15 +80,20 @@ function CustomerDetail() {
     id,
     activeTab
   );
+  // Query ini memakai "all" agar chart aktivitas memuat transaksi dan chat.
+  const { data: activityTimeline } = useCustomerTimeline(
+    id,
+    "all",
+    200
+  );
   const { data: actions } = useCustomerActions(id);
   const { data: riskHistory } = useCustomerRiskHistory(id);
 
   // Reconstructed activity timeline progression
+  // Pakai activityTimeline agar grafik tidak bergantung pada tab aktif.
   const activityTimelineData = useMemo(() => {
     const dailyMap = {};
-    
-    // Extract transaction items and message items from timeline
-    const items = timeline?.items || timeline?.data || [];
+    const items = activityTimeline?.items || activityTimeline?.data || [];
     items.forEach((item) => {
       if (!item.date) return;
       const dateStr = item.date.slice(0, 10);
@@ -102,9 +107,8 @@ function CustomerDetail() {
         dailyMap[dateStr].messages += 1;
       }
     });
-
     return Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
-  }, [timeline]);
+  }, [activityTimeline]);
 
   if (isLoading) {
     return (
@@ -143,6 +147,8 @@ function CustomerDetail() {
     text_semantics,
     last_messages,
     historical_messages,
+    complaint_messages,
+    recommendation_context,
   } = data;
 
   const fallbackStats = {
@@ -173,6 +179,9 @@ function CustomerDetail() {
     latest_prediction?.risk_label || getRiskLevel(latest_prediction?.risk_score || 0);
   const riskColors = getRiskColors(riskLevel);
   const suggestions = getDynamicActionSuggestions(latest_prediction?.top_reasons);
+  const operationalRecommendation = recommendation_context?.recommendation;
+  const recommendationDetails = operationalRecommendation?.details || {};
+  const customerVoice = recommendation_context?.customer_voice;
 
   // Process top reasons
   const topReasons = (latest_prediction?.top_reasons || [])
@@ -211,8 +220,28 @@ function CustomerDetail() {
         title: mapping.title || FEATURE_LABELS[reason.feature] || reason.feature,
         detail,
         impactLevel,
+        impact: reason.impact || 0,
+        feature: reason.feature,
       };
     });
+
+  const riskProfileEntries = Object.entries(numeric_features || {})
+    .filter(([key]) => key !== "as_of_date")
+    .map(([key, value]) => {
+      const label = FEATURE_LABELS[key] || key.replace(/_/g, " ");
+      const isMonetary = ["spend_90d", "avg_tx_value"].includes(key);
+      const displayValue = isMonetary
+        ? formatCurrency(value || 0)
+        : typeof value === "number"
+        ? value.toFixed(2)
+        : value || "-";
+
+      return { key, label, value, displayValue };
+    });
+
+  const visibleRiskProfileEntries = showAllFeatures
+    ? riskProfileEntries
+    : riskProfileEntries.slice(0, 8);
 
   // Risk history chart data
   const riskHistoryData = (riskHistory?.history || []).map((h) => ({
@@ -405,59 +434,112 @@ function CustomerDetail() {
       {/* SECTION B: Why At Risk? */}
       {activeSection === "overview" && (
       <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.85fr] gap-6">
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-lg font-semibold text-primary-900 mb-4">
-          Mengapa Berisiko?
-        </h2>
+      <div className="overflow-hidden rounded-2xl border border-amber-100 bg-white shadow-md">
+        <div className="border-b border-amber-100 bg-gradient-to-r from-amber-50 via-white to-rose-50 p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-700">
+                Risk Explanation
+              </p>
+              <h2 className="mt-1 text-xl font-bold text-primary-950">
+                Mengapa Berisiko?
+              </h2>
+              <p className="mt-1 text-sm text-stone-600">
+                Faktor terbesar yang mendorong skor churn customer ini.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-right shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                Risk score
+              </p>
+              <p className="text-2xl font-black text-primary-950">
+                {((latest_prediction?.risk_score || 0) * 100).toFixed(0)}%
+              </p>
+            </div>
+          </div>
+        </div>
         {topReasons.length > 0 ? (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 p-6">
             {topReasons.map((reason, idx) => (
               <div
                 key={idx}
-                className={`flex items-start gap-3 p-4 rounded-lg border-l-4 ${
+                className={`group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${
                   reason.impactLevel === "high"
-                    ? "bg-red-50 border-red-500"
+                    ? "border-rose-200 bg-rose-50/70"
                     : reason.impactLevel === "medium"
-                    ? "bg-yellow-50 border-yellow-500"
-                    : "bg-primary-50 border-primary-300"
+                    ? "border-amber-200 bg-amber-50/70"
+                    : "border-primary-100 bg-primary-50/70"
                 }`}
               >
-                <BarChart3 className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <h4 className="font-medium text-primary-900">
-                      {reason.title}
-                    </h4>
-                    <Badge
-                      color={
-                        reason.impactLevel === "high"
-                          ? "red"
-                          : reason.impactLevel === "medium"
-                          ? "yellow"
-                          : "gray"
-                      }
-                    >
-                      {reason.impactLevel === "high"
-                        ? "Impact Tinggi"
-                        : reason.impactLevel === "medium"
-                        ? "Impact Sedang"
-                        : "Impact Rendah"}
-                    </Badge>
+                <div className="flex items-start gap-4">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-black ${
+                    reason.impactLevel === "high"
+                      ? "bg-rose-600 text-white"
+                      : reason.impactLevel === "medium"
+                      ? "bg-amber-500 text-white"
+                      : "bg-primary-600 text-white"
+                  }`}>
+                    {idx + 1}
                   </div>
-                  <p className="text-sm text-stone-600 mt-1">{reason.detail}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="font-semibold text-primary-950">
+                        {reason.title}
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-stone-500">
+                          impact {Math.abs(reason.impact).toFixed(3)}
+                        </span>
+                        <Badge
+                          color={
+                            reason.impactLevel === "high"
+                              ? "red"
+                              : reason.impactLevel === "medium"
+                              ? "yellow"
+                              : "gray"
+                          }
+                        >
+                          {reason.impactLevel === "high"
+                            ? "Tinggi"
+                            : reason.impactLevel === "medium"
+                            ? "Sedang"
+                            : "Rendah"}
+                        </Badge>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-stone-700">
+                      {reason.detail}
+                    </p>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/80">
+                      <div
+                        className={`h-full rounded-full ${
+                          reason.impactLevel === "high"
+                            ? "bg-rose-500"
+                            : reason.impactLevel === "medium"
+                            ? "bg-amber-500"
+                            : "bg-primary-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.max(12, Math.abs(reason.impact) * 280))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-primary-100 bg-primary-50 p-4">
-            <p className="text-sm font-medium text-primary-900">
-              SHAP explanation belum tersedia
-            </p>
-            <p className="mt-1 text-sm text-stone-600">
-              Risk score tetap tersedia, tetapi alasan utama belum dihitung dari kontribusi model XGBoost.
-              Jalankan retrain sampai artifact SHAP tersedia lalu jalankan Run Risk Scoring.
-            </p>
+          <div className="p-6">
+            <div className="rounded-2xl border border-primary-100 bg-primary-50 p-4">
+              <p className="text-sm font-semibold text-primary-900">
+                SHAP explanation belum tersedia
+              </p>
+              <p className="mt-1 text-sm text-stone-600">
+                Risk score tetap tersedia, tetapi alasan utama belum dihitung dari kontribusi model XGBoost.
+                Jalankan retrain sampai artifact SHAP tersedia lalu jalankan Run Risk Scoring.
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -472,25 +554,75 @@ function CustomerDetail() {
         </p>
 
         <div className="space-y-3 mb-6">
-          {suggestions.map((suggestion, idx) => (
-            <div
-              key={idx}
-              className="flex items-start gap-3 p-3 bg-primary-50 rounded-lg hover:bg-primary-100 transition cursor-pointer"
-              onClick={() => {
-                if (suggestion.type !== "none") {
-                  setShowCreateAction(true);
-                }
-              }}
-            >
-              <Lightbulb className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
-              <span className="flex-1 text-sm font-medium text-primary-800">
-                {suggestion.text}
-              </span>
-              {suggestion.type !== "none" && (
-                <Plus className="h-5 w-5 text-primary-400 shrink-0" />
+          {operationalRecommendation ? (
+            <div className="rounded-xl border border-purple-200 bg-purple-50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-purple-950">
+                    {operationalRecommendation.title}
+                  </p>
+                  <p className="mt-1 text-sm text-purple-900">
+                    {operationalRecommendation.rationale}
+                  </p>
+                </div>
+                <Badge color={
+                  operationalRecommendation.priority === "high"
+                    ? "red"
+                    : operationalRecommendation.priority === "medium"
+                    ? "yellow"
+                    : "gray"
+                }>
+                  {operationalRecommendation.priority}
+                </Badge>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {(operationalRecommendation.reason_codes || []).map((code) => (
+                  <span key={code} className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-purple-700">
+                    {code}
+                  </span>
+                ))}
+              </div>
+              {Object.keys(recommendationDetails).length > 0 && (
+                <div className="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                  <div className="rounded-lg bg-white p-3 text-purple-900">
+                    <span className="block font-semibold">Tujuan</span>
+                    <span>{recommendationDetails.objective || "-"}</span>
+                  </div>
+                  <div className="rounded-lg bg-white p-3 text-purple-900">
+                    <span className="block font-semibold">Waktu & channel</span>
+                    <span>
+                      {recommendationDetails.timing || "-"} ??{" "}
+                      {recommendationDetails.channel || "-"}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white p-3 text-purple-900 sm:col-span-2">
+                    <span className="block font-semibold">Contoh pembuka</span>
+                    <span>{recommendationDetails.suggested_opening || "-"}</span>
+                  </div>
+                </div>
               )}
             </div>
-          ))}
+          ) : (
+            suggestions.map((suggestion, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-3 p-3 bg-primary-50 rounded-lg hover:bg-primary-100 transition cursor-pointer"
+                onClick={() => {
+                  if (suggestion.type !== "none") {
+                    setShowCreateAction(true);
+                  }
+                }}
+              >
+                <Lightbulb className="h-5 w-5 text-primary-600 mt-0.5 shrink-0" />
+                <span className="flex-1 text-sm font-medium text-primary-800">
+                  {suggestion.text}
+                </span>
+                {suggestion.type !== "none" && (
+                  <Plus className="h-5 w-5 text-primary-400 shrink-0" />
+                )}
+              </div>
+            ))
+          )}
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -519,50 +651,55 @@ function CustomerDetail() {
       <div className="grid grid-cols-1 gap-6">
         {/* Profil Risiko (numeric_features) */}
         {numeric_features && Object.keys(numeric_features).length > 0 && (
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-semibold text-primary-900 mb-4 flex items-center gap-2">
-              <BarChart3 className="h-5 w-5 text-primary-600" />
-              Profil Risiko
-            </h2>
-            <div className="space-y-3">
-              {Object.entries(numeric_features)
-                .filter(([key]) => key !== "as_of_date")
-                .slice(0, showAllFeatures ? undefined : 4)
-                .map(([key, value]) => {
-                  const label = FEATURE_LABELS[key] || key.replace(/_/g, " ");
-                  const isMonetary = ["spend_90d", "avg_tx_value"].includes(key);
-                  const displayValue = isMonetary
-                    ? formatCurrency(value || 0)
-                    : typeof value === "number"
-                    ? value.toFixed(2)
-                    : value || "-";
-
-                  return (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between py-2 border-b border-primary-100 last:border-0"
-                    >
-                      <span className="text-sm text-stone-600">{label}</span>
-                      <span className="text-sm font-semibold text-primary-900">
-                        {displayValue}
-                      </span>
-                    </div>
-                  );
-                })}
+          <div className="overflow-hidden rounded-2xl border border-primary-100 bg-white shadow-md">
+            <div className="flex flex-col gap-3 border-b border-primary-100 bg-gradient-to-r from-primary-50 to-white p-6 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="flex items-center gap-2 text-xl font-bold text-primary-950">
+                  <BarChart3 className="h-5 w-5 text-primary-600" />
+                  Profil Risiko
+                </h2>
+                <p className="mt-1 text-sm text-stone-600">
+                  Ringkasan fitur numerik yang dipakai model pada tanggal prediksi.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-right shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                  As of
+                </p>
+                <p className="text-sm font-bold text-primary-950">
+                  {numeric_features?.as_of_date || latest_prediction?.as_of_date || "-"}
+                </p>
+              </div>
             </div>
-            
-            {Object.keys(numeric_features).length > 5 && (
+
+            <div className="grid grid-cols-2 gap-3 p-6 md:grid-cols-3 xl:grid-cols-4">
+              {visibleRiskProfileEntries.map((entry) => (
+                <div
+                  key={entry.key}
+                  className="rounded-2xl border border-stone-200 bg-stone-50/70 p-4 transition hover:border-primary-200 hover:bg-primary-50/60"
+                >
+                  <p className="line-clamp-2 min-h-[2rem] text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+                    {entry.label}
+                  </p>
+                  <p className="mt-3 break-words text-lg font-black text-primary-950">
+                    {entry.displayValue}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {riskProfileEntries.length > 8 && (
               <button
                 onClick={() => setShowAllFeatures(!showAllFeatures)}
-                className="mt-4 flex items-center justify-center gap-2 w-full py-2 text-sm text-primary-600 hover:bg-primary-50 rounded-lg transition"
+                className="flex w-full items-center justify-center gap-2 border-t border-primary-100 px-4 py-3 text-sm font-semibold text-primary-700 transition hover:bg-primary-50"
               >
                 {showAllFeatures ? (
                   <>
-                    <ChevronUp className="h-4 w-4" /> Sembunyikan detail fitur
+                    <ChevronUp className="h-4 w-4" /> Ringkas profil risiko
                   </>
                 ) : (
                   <>
-                    <ChevronDown className="h-4 w-4" /> Lihat semua fitur teknis
+                    <ChevronDown className="h-4 w-4" /> Lihat semua fitur teknis ({riskProfileEntries.length})
                   </>
                 )}
               </button>
@@ -680,8 +817,13 @@ function CustomerDetail() {
             <div className="p-3 bg-purple-50 rounded-xl border border-purple-100 shadow-sm">
               <div className="flex items-center gap-2 text-purple-800 text-sm font-semibold mb-1">
                 <Hash className="h-4 w-4 text-purple-500" />
-                Topik Dominan: {text_semantics?.dominant_topic || "Belum tersedia"}
+                Topik Dominan: {text_semantics?.dominant_topic_name || "Belum tersedia"}
               </div>
+              {text_semantics?.dominant_topic && text_semantics?.dominant_topic_name && (
+                <p className="mb-2 text-[10px] font-medium text-purple-500">
+                  Topic ID: {text_semantics.dominant_topic}
+                </p>
+              )}
               {Array.isArray(text_semantics?.top_keywords) && text_semantics.top_keywords.length > 0 ? (
                 <div className="flex flex-wrap gap-1 mt-2">
                   {text_semantics.top_keywords.map((kw, i) => (
@@ -751,6 +893,38 @@ function CustomerDetail() {
               ) : (
                 <div className="p-3 rounded-xl text-xs border border-stone-200 bg-stone-50 text-stone-500">
                   Tidak ada chat dalam window prediksi 30 hari.
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-xs font-semibold text-stone-600 mb-2">Riwayat Komplain Terdeteksi</h3>
+              {complaint_messages && complaint_messages.length > 0 ? (
+                <div className="space-y-2">
+                  {complaint_messages.slice(0, 3).map((msg, idx) => (
+                    <div key={idx} className="p-3 rounded-xl text-xs border-l-4 border-l-rose-500 bg-rose-50/60 shadow-sm">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <Badge color="red" className="text-[9px] uppercase font-bold px-1.5 py-0.5">
+                            Komplain
+                          </Badge>
+                          <Badge color={msg.direction === "inbound" ? "purple" : "gray"} className="text-[9px] uppercase font-bold px-1.5 py-0.5">
+                            {msg.direction || "chat"}
+                          </Badge>
+                        </div>
+                        <span className="text-[10px] text-stone-400">
+                          {formatRelativeTime(msg.timestamp)}
+                        </span>
+                      </div>
+                      <p className="text-stone-700 italic font-medium leading-relaxed">
+                        {msg.text_snippet}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl text-xs border border-stone-200 bg-stone-50 text-stone-500">
+                  Tidak ada komplain yang terdeteksi pada riwayat chat.
                 </div>
               )}
             </div>
@@ -957,7 +1131,7 @@ function CustomerDetail() {
                   <Line
                     type="monotone"
                     dataKey="messages"
-                    name="Jumlah Chat Masuk"
+                    name="Jumlah Chat"
                     stroke="#8b5cf6"
                     strokeWidth={3}
                     dot={{ r: 5, fill: "#8b5cf6", strokeWidth: 2, stroke: "#fff" }}

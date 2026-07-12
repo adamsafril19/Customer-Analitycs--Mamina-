@@ -69,7 +69,7 @@ class Config:
     
     # Model Config
     MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
-    RISK_LOW_THRESHOLD = float(os.getenv("RISK_LOW_THRESHOLD", "0.40"))
+    RISK_LOW_THRESHOLD = float(os.getenv("RISK_LOW_THRESHOLD", "0.39"))
     RISK_HIGH_THRESHOLD = float(os.getenv("RISK_HIGH_THRESHOLD", "0.90"))
     ENABLE_SHAP = os.getenv("ENABLE_SHAP", "true").lower() == "true"
     SHAP_BACKGROUND_MODE = os.getenv("SHAP_BACKGROUND_MODE", "true").lower() == "true"

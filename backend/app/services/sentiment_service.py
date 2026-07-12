@@ -42,7 +42,48 @@ class SentimentService:
         self.model = None
         self.tokenizer = None
         self.model_version = None  # Track model version for semantic continuity
+        self.index_labels = list(self.LABELS)
         self._initialized = True
+
+    @staticmethod
+    def _normalize_label(label: str) -> Optional[str]:
+        normalized = str(label or "").strip().lower()
+        aliases = {
+            "negative": "negative",
+            "negatif": "negative",
+            "neg": "negative",
+            "neutral": "neutral",
+            "netral": "neutral",
+            "neu": "neutral",
+            "positive": "positive",
+            "positif": "positive",
+            "pos": "positive",
+        }
+        return aliases.get(normalized)
+
+    def _configure_labels(self) -> None:
+        """Honor the model's id2label mapping instead of assuming logit order."""
+        raw_mapping = getattr(self.model.config, "id2label", {}) or {}
+        resolved = []
+        for index in range(int(self.model.config.num_labels)):
+            raw_label = raw_mapping.get(index, raw_mapping.get(str(index), ""))
+            resolved.append(self._normalize_label(raw_label))
+        if len(resolved) == 3 and all(resolved) and len(set(resolved)) == 3:
+            self.index_labels = resolved
+            return
+
+        # The selected IndoBERTweet checkpoint documents the conventional
+        # negative/neutral/positive order. Generic LABEL_n configs use this fallback.
+        if len(resolved) == 3:
+            self.index_labels = list(self.LABELS)
+            logger.warning(
+                "Sentiment model exposes generic labels; using documented "
+                "negative/neutral/positive logit order."
+            )
+            return
+        raise RuntimeError(
+            f"Unsupported sentiment label mapping: {raw_mapping!r}"
+        )
     
     def get_model_version(self) -> str:
         """Get current model version identifier"""
@@ -68,6 +109,7 @@ class SentimentService:
             self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME)
             self.model = AutoModelForSequenceClassification.from_pretrained(self.MODEL_NAME)
             self.model.eval()
+            self._configure_labels()
             
             # Use GPU if available
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -125,11 +167,13 @@ class SentimentService:
             probs = torch.softmax(outputs.logits, dim=-1)
             
         probs_list = probs[0].cpu().tolist()
-        p_neg, p_neu, p_pos = probs_list
+        probabilities = dict(zip(self.index_labels, probs_list))
+        p_neg = probabilities["negative"]
+        p_pos = probabilities["positive"]
         
         # Get label
         pred_idx = torch.argmax(probs, dim=-1).item()
-        label = self.LABELS[pred_idx]
+        label = self.index_labels[pred_idx]
         
         # CORRECT: Valence = P(positive) - P(negative)
         valence = p_pos - p_neg
@@ -184,10 +228,12 @@ class SentimentService:
                     results.append(("neutral", 0.0))
                 else:
                     probs_j = probs[j].cpu().tolist()
-                    p_neg, p_neu, p_pos = probs_j
+                    probabilities = dict(zip(self.index_labels, probs_j))
+                    p_neg = probabilities["negative"]
+                    p_pos = probabilities["positive"]
                     
                     pred_idx = torch.argmax(probs[j]).item()
-                    label = self.LABELS[pred_idx]
+                    label = self.index_labels[pred_idx]
                     valence = p_pos - p_neg
                     
                     results.append((label, round(valence, 4)))

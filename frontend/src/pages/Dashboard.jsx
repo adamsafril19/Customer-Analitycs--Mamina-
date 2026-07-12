@@ -59,10 +59,26 @@ function Dashboard() {
     isLoading: statsLoading,
     refetch: refetchStats,
   } = useDashboardStats();
-  const { data: trend, isLoading: trendLoading } = useDashboardTrend(30);
-  const { data: drivers, isLoading: driversLoading } = useTopDrivers();
-  const { data: insightsData, isLoading: insightsLoading } = useBehavioralInsights();
-  const { data: highRiskCustomers, isLoading: customersLoading } = useCustomers(
+  const {
+    data: trend,
+    isLoading: trendLoading,
+    refetch: refetchTrend,
+  } = useDashboardTrend(30);
+  const {
+    data: drivers,
+    isLoading: driversLoading,
+    refetch: refetchDrivers,
+  } = useTopDrivers();
+  const {
+    data: insightsData,
+    isLoading: insightsLoading,
+    refetch: refetchInsights,
+  } = useBehavioralInsights();
+  const {
+    data: highRiskCustomers,
+    isLoading: customersLoading,
+    refetch: refetchCustomers,
+  } = useCustomers(
     {
       risk_level: "high",
       sort: "risk_score",
@@ -71,8 +87,14 @@ function Dashboard() {
     }
   );
 
-  const handleRefresh = () => {
-    refetchStats();
+  const handleRefresh = async () => {
+    await Promise.all([
+      refetchStats(),
+      refetchTrend(),
+      refetchDrivers(),
+      refetchInsights(),
+      refetchCustomers(),
+    ]);
   };
 
   const insights = insightsData?.insights || [];

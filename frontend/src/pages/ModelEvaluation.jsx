@@ -13,6 +13,10 @@ import {
   HelpCircle,
   ArrowRightLeft,
   Sparkles,
+  Sliders,
+  Brain,
+  Network,
+  Activity,
 } from "lucide-react";
 import {
   Bar,
@@ -47,6 +51,30 @@ const metricLabels = {
   precision: "Precision",
   recall: "Recall",
   f1_score: "F1-Score",
+};
+
+const featureLabelsID = {
+  "recency_ratio": "Rasio Keterlambatan Kunjungan",
+  "frequency_trend_smoothed": "Tren Frekuensi Kunjungan",
+  "spend_trend_smoothed": "Tren Nilai Transaksi",
+  "msg_trend_smoothed": "Tren Komunikasi WhatsApp",
+  "sentiment_trend": "Tren Sentimen",
+  "recency_days": "Hari Sejak Transaksi Terakhir",
+  "tx_count_90d": "Jumlah Transaksi 90 Hari",
+  "spend_90d": "Total Belanja 90 Hari",
+  "avg_tx_value": "Rata-rata Nilai Transaksi",
+  "tenure_days": "Lama Menjadi Customer",
+  "activity_mean": "Rata-rata Aktivitas",
+  "recent_activity_avg": "Aktivitas Terkini",
+  "activity_std": "Variasi Aktivitas",
+  "activity_cv": "Stabilitas Aktivitas",
+  "spend_volatility_cv": "Stabilitas Nilai Belanja",
+  "trend_magnitude_interaction": "Interaksi Tren dan Aktivitas",
+  "avg_sentiment_score": "Rata-rata Sentimen",
+  "complaint_ratio": "Rasio Komplain",
+  "msg_volatility": "Volatilitas Pesan",
+  "response_delay_mean": "Rata-rata Waktu Respons",
+  "has_communication_90d": "Ketersediaan Komunikasi 90 Hari",
 };
 
 function formatMetric(value) {
@@ -122,14 +150,26 @@ export default function ModelEvaluation() {
       {/* SECTION 1: MODEL OVERVIEW */}
       <div className="bg-white rounded-2xl border border-primary-100 shadow-sm overflow-hidden">
         <div className="border-b border-primary-50 bg-stone-50/55 p-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary-100 text-primary-700">
-              <Layers className="h-5 w-5" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary-100 text-primary-700">
+                <Layers className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-primary-900">Model Meta-Overview</h2>
+                <p className="text-xs text-stone-500 mt-0.5">Spesifikasi teknis, versi, dan volume data latih model aktif.</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-primary-900">Model Meta-Overview</h2>
-              <p className="text-xs text-stone-500 mt-0.5">Spesifikasi teknis, versi, dan volume data latih model aktif.</p>
-            </div>
+            {data.model_type && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-pink-50 text-pink-700 border border-pink-100 self-start sm:self-auto">
+                <Brain className="h-3.5 w-3.5" />
+                {data.model_type === "gated_transaction_xgb_logistic" 
+                  ? "XGBoost + Gated Logistic Regression" 
+                  : data.model_type === "baseline" 
+                  ? "Baseline Transaction Model" 
+                  : data.model_type}
+              </span>
+            )}
           </div>
         </div>
         <div className="p-6">
@@ -228,23 +268,37 @@ export default function ModelEvaluation() {
               <ArrowRightLeft className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-primary-900">Baseline vs Multimodal Comparison</h2>
-              <p className="text-xs text-stone-500 mt-0.5">Validasi H2: dampak penambahan sinyal interaksi WhatsApp/NLP terhadap baseline transaksi.</p>
+              <h2 className="text-lg font-bold text-primary-900">Validasi H2: Transaksi vs Multimodal</h2>
+              <p className="text-xs text-stone-500 mt-0.5">Analisis dampak penambahan fitur komunikasi WhatsApp/NLP terhadap model berbasis transaksi saja.</p>
             </div>
           </div>
         </div>
         <div className="p-6 space-y-6">
           {comparisonRows.length ? (
             <>
+              {/* Clarification Note */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-sm text-amber-900 leading-relaxed">
+                  <strong>Catatan Teknis — Mengapa nilainya sama?</strong>{" "}
+                  Kolom <em>"Baseline (18 fitur transaksi)"</em> dan <em>"Multimodal (25 fitur)"</em>{" "}
+                  menampilkan performa XGBoost masing-masing model pada <em>full test set</em> yang sama{" "}
+                  (13.055 baris, 7 observation dates). Pada arsitektur <em>gated</em> saat ini,{" "}
+                  sinyal komunikasi divalidasi secara terpisah hanya pada cohort pelanggan WhatsApp aktif —{" "}
+                  bukan pada full test set — sehingga nilai kedua kolom dapat tampak identik.{" "}
+                  Kolom <em>"Δ Gate"</em> menunjukkan perubahan metrik dari model gate tersebut (lihat bagian Gated Adjuster).
+                </div>
+              </div>
+
               <div className="overflow-hidden rounded-xl border border-stone-200">
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm divide-y divide-stone-200">
                     <thead className="bg-stone-50 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
                       <tr>
-                        <th className="px-6 py-4">Metric</th>
-                        <th className="px-6 py-4">Baseline</th>
-                        <th className="px-6 py-4">Multimodal</th>
-                        <th className="px-6 py-4">Improvement</th>
+                        <th className="px-6 py-4">Metrik</th>
+                        <th className="px-6 py-4">Baseline (18 fitur transaksi)</th>
+                        <th className="px-6 py-4">Multimodal (25 fitur)</th>
+                        <th className="px-6 py-4">Δ Gate (cohort WA)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100 bg-white">
@@ -287,11 +341,167 @@ export default function ModelEvaluation() {
         </div>
       </div>
 
+      {/* SECTION: GATED ADJUSTER (REGULARIZED LOGISTIC REGRESSION) */}
+      {data.model_type === "gated_transaction_xgb_logistic" && data.gated_adjuster && (
+        <div className="bg-white rounded-2xl border border-primary-100 shadow-sm overflow-hidden animate-fade-in">
+          <div className="border-b border-primary-50 bg-stone-50/55 p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-pink-100 text-pink-700">
+                  <Brain className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-primary-900">Gated Adjuster (Logistic Regression)</h2>
+                  <p className="text-xs text-stone-500 mt-0.5">Validasi model penyesuaian berbasis interaksi komunikasi pelanggan.</p>
+                  <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                    <Users className="h-3 w-3" />
+                    Dievaluasi pada: Cohort WhatsApp saja (279 baris, 47 pelanggan) — bukan full test set
+                  </span>
+                </div>
+              </div>
+              <div className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full ${
+                data.adjustment_enabled 
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                  : "bg-amber-50 text-amber-700 border border-amber-200"
+              }`}>
+                <Sliders className="h-3.5 w-3.5" />
+                <span>Status Gate: {data.adjustment_enabled ? "Active (Gated)" : "Bypassed (XGBoost Only)"}</span>
+              </div>
+            </div>
+          </div>
+          <div className="p-6 space-y-6">
+            {/* Cohort & Strategy Info Cards */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-stone-200 p-4 bg-stone-50/30 hover:border-pink-200 transition-all">
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Cohort Terarah</span>
+                <p className="mt-1 text-sm font-bold text-stone-800">WhatsApp Interaction</p>
+                <p className="text-[11px] text-stone-500 mt-1">Penyesuaian hanya berlaku untuk pelanggan dengan sinyal chat aktif.</p>
+              </div>
+              <div className="rounded-xl border border-stone-200 p-4 bg-stone-50/30 hover:border-pink-200 transition-all">
+                <span className="text-[10px] font-bold text-stone-450 uppercase tracking-wider">Metode Estimasi</span>
+                <p className="mt-1 text-sm font-bold text-stone-800">ElasticNet Logistic Reg.</p>
+                <p className="text-[11px] text-stone-500 mt-1">Mencegah overfitting dengan regularisasi L1 + L2 (ElasticNet).</p>
+              </div>
+              <div className="rounded-xl border border-stone-200 p-4 bg-stone-50/30 hover:border-pink-200 transition-all">
+                <span className="text-[10px] font-bold text-stone-450 uppercase tracking-wider">K-Fold Validation</span>
+                <p className="mt-1 text-sm font-bold text-stone-800">5-Fold Group K-Fold</p>
+                <p className="text-[11px] text-stone-500 mt-1">Grup per pelanggan untuk mencegah kebocoran data temporal.</p>
+              </div>
+              <div className="rounded-xl border border-stone-200 p-4 bg-stone-50/30 hover:border-pink-200 transition-all">
+                <span className="text-[10px] font-bold text-stone-450 uppercase tracking-wider">Volume Sampel Cohort</span>
+                <p className="mt-1 text-sm font-bold text-stone-800">
+                  {data.gated_adjuster.rows} Sampel ({data.gated_adjuster.unique_customers} Cust)
+                </p>
+                <p className="text-[11px] text-stone-500 mt-1">
+                  Mencakup {data.gated_adjuster.positive_labels} label disengaged dan {data.gated_adjuster.negative_labels} label aktif.
+                </p>
+              </div>
+            </div>
+
+            {/* Metrics Comparison Table */}
+            <div>
+              <h3 className="text-sm font-bold text-stone-800 mb-2 flex items-center gap-1.5">
+                <Activity className="h-4 w-4 text-pink-500 animate-pulse" />
+                Perbandingan Performa pada Cohort Komunikasi
+              </h3>
+              <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50/50 px-4 py-2.5 text-xs text-rose-900 leading-relaxed">
+                <strong>⚠️ Mengapa nilainya berbeda dengan Key AI Metrics di atas?</strong>{" "}
+                Metrik di sini dihitung <strong>hanya pada cohort WhatsApp (279 baris, 47 pelanggan)</strong> — subset yang jauh lebih kecil dan lebih sulit dibanding full test set (13.055 baris). Precision lebih rendah karena rasio label disengaged di cohort ini lebih imbalanced (58 positif : 221 negatif dari hanya 47 pelanggan). Ini wajar secara statistik dan bukan indikasi model rusak.
+              </div>
+              <div className="overflow-hidden rounded-xl border border-stone-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm divide-y divide-stone-200">
+                    <thead className="bg-stone-50 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                      <tr>
+                        <th className="px-6 py-4">Metrik Evaluasi</th>
+                        <th className="px-6 py-4">Base model (XGBoost)</th>
+                        <th className="px-6 py-4 text-pink-905">Gated Adjuster (Logistic Regression)</th>
+                        <th className="px-6 py-4">Perubahan Sensitivitas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white">
+                      {[
+                        { key: "roc_auc", label: "ROC-AUC", desc: "Konsistensi pemisahan risiko" },
+                        { key: "pr_auc", label: "PR-AUC", desc: "Presisi-Recall kurva area" },
+                        { key: "precision", label: "Precision", desc: "Akurasi penargetan intervensi" },
+                        { key: "recall", label: "Recall (Sensitivitas)", desc: "Tingkat tangkapan risiko" },
+                        { key: "f1", label: "F1-Score", desc: "Rata-rata seimbang" },
+                        { key: "accuracy", label: "Accuracy", desc: "Persentase tebakan benar" }
+                      ].map((item) => {
+                        const baseVal = data.gated_adjuster.base_on_multimodal_cohort[item.key];
+                        const gatedVal = data.gated_adjuster.gated_logistic[item.key];
+                        const gain = data.gated_adjuster.improvement[item.key];
+                        
+                        return (
+                          <tr key={item.key} className="hover:bg-primary-50/20 transition-all">
+                            <td className="px-6 py-4">
+                              <span className="font-semibold text-stone-800">{item.label}</span>
+                              <span className="block text-[10px] text-stone-400 mt-0.5">{item.desc}</span>
+                            </td>
+                            <td className="px-6 py-4 font-mono text-stone-700">{formatMetric(baseVal)}</td>
+                            <td className="px-6 py-4 font-mono font-bold text-pink-950">{formatMetric(gatedVal)}</td>
+                            <td className={`px-6 py-4 font-mono font-bold ${Number(gain || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                              <span className="inline-flex items-center gap-1">
+                                {formatGain(gain)}
+                                {item.key === "recall" && Number(gain || 0) > 0 && (
+                                  <span className="text-[10px] bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200 font-sans font-bold animate-bounce">
+                                    Recall Naik!
+                                  </span>
+                                )}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Neutralized Features Badges */}
+            {data.neutralized_model_features && data.neutralized_model_features.length > 0 && (
+              <div className="pt-2">
+                <h3 className="text-sm font-bold text-stone-800 mb-3 flex items-center gap-1.5">
+                  <Network className="h-4 w-4 text-purple-500" />
+                  XGBoost-Neutralized Features (Didelegasikan ke Logistic Gate)
+                </h3>
+                <p className="text-xs text-stone-500 mb-3 leading-relaxed">
+                  Fitur-fitur interaksi di bawah ini sengaja dinetralkan (diabaikan) pada model utama XGBoost untuk menghindari bias transaksi langsung, dan didelegasikan sepenuhnya ke model penyesuaian regresi logistik ter-regularisasi demi kestabilan keputusan:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {data.neutralized_model_features.map((feature) => {
+                    const mappedLabel = featureLabelsID[feature] || feature;
+                    return (
+                      <span 
+                        key={feature} 
+                        className="inline-flex flex-col items-start px-3 py-1.5 rounded-xl bg-purple-50/50 hover:bg-purple-50 border border-purple-100 hover:border-purple-250 text-purple-950 transition-all cursor-default"
+                      >
+                        <span className="text-xs font-semibold">{mappedLabel}</span>
+                        <span className="text-[9px] font-mono text-purple-600 mt-0.5">{feature}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* SECTION 3: TECHNICAL METRICS WITH GAUGES */}
       <div className="bg-white rounded-2xl border border-primary-100 shadow-sm overflow-hidden">
         <div className="border-b border-primary-50 bg-stone-50/55 p-6">
-          <h2 className="text-lg font-bold text-primary-900">Key AI Performance Metrics</h2>
-          <p className="text-xs text-stone-500 mt-0.5">Penilaian akurasi matematis model berdasarkan hasil validasi test set.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-primary-900">Key AI Performance Metrics</h2>
+              <p className="text-xs text-stone-500 mt-0.5">Penilaian akurasi matematis model XGBoost berdasarkan hasil validasi test set.</p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 self-start sm:self-auto whitespace-nowrap">
+              <Users className="h-3.5 w-3.5" />
+              Dievaluasi pada: Full Test Set (13.055 baris)
+            </span>
+          </div>
         </div>
         <div className="p-6">
           {metrics ? (
@@ -357,57 +567,70 @@ export default function ModelEvaluation() {
             </div>
           </div>
         </div>
-        <div className="p-6">
+        <div className="p-6 space-y-4">
           {thresholdRows.length ? (
-            <div className="overflow-hidden rounded-xl border border-stone-200">
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm divide-y divide-stone-200">
-                  <thead className="bg-stone-50 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
-                    <tr>
-                      <th className="px-6 py-4">Batas Skor (Threshold)</th>
-                      <th className="px-6 py-4">Precision (Kebenaran Sasaran)</th>
-                      <th className="px-6 py-4">Recall (Tangkapan Risiko)</th>
-                      <th className="px-6 py-4 bg-pink-50/40 text-pink-900 font-extrabold border-x border-pink-100">F1-Score (Titik Optimal)</th>
-                      <th className="px-6 py-4">Volume Pelanggan (High Risk)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100 bg-white">
-                    {thresholdRows.map((row) => {
-                      const isF1Optimal = row.f1_score > 0.75 || row.f1 > 0.75;
-                      return (
-                        <tr 
-                          key={row.threshold} 
-                          className="hover:bg-primary-50/30 transition-all"
-                        >
-                          <td className="px-6 py-4 font-semibold text-stone-800">
-                            <span className="inline-flex items-center justify-center rounded-lg bg-stone-100 px-2 py-1 text-xs text-stone-700 border border-stone-200 font-mono">
-                              {(row.threshold * 100).toFixed(0)}% ({row.threshold.toFixed(2)})
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-stone-600 font-medium">
-                            {formatMetric(row.precision)}
-                          </td>
-                          <td className="px-6 py-4 text-stone-600 font-medium">
-                            {formatMetric(row.recall)}
-                          </td>
-                          <td className="px-6 py-4 bg-pink-50/20 font-extrabold text-pink-700 border-x border-pink-100/60">
-                            <div className="flex items-center gap-2">
-                              <span>{formatMetric(row.f1_score || row.f1)}</span>
-                              {isF1Optimal && (
-                                <span className="inline-flex h-2 w-2 rounded-full bg-pink-500 animate-ping" />
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-stone-700 font-semibold">
-                            {row.high_risk_customers ?? row.customer_count ?? "-"} <span className="text-xs font-normal text-stone-400 ml-1">pelanggan</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <>
+              <div className="overflow-hidden rounded-xl border border-stone-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm divide-y divide-stone-200">
+                    <thead className="bg-stone-50 text-left text-xs font-bold uppercase tracking-wider text-stone-600">
+                      <tr>
+                        <th className="px-6 py-4">Batas Skor (Threshold)</th>
+                        <th className="px-6 py-4">Precision (Kebenaran Sasaran)</th>
+                        <th className="px-6 py-4">Recall (Tangkapan Risiko)</th>
+                        <th className="px-6 py-4 bg-pink-50/40 text-pink-900 font-extrabold border-x border-pink-100">F1-Score (Titik Optimal)</th>
+                        <th className="px-6 py-4">Prediksi High Risk (baris test)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white">
+                      {thresholdRows.map((row) => {
+                        const isF1Optimal = row.f1_score > 0.75 || row.f1 > 0.75;
+                        return (
+                          <tr 
+                            key={row.threshold} 
+                            className="hover:bg-primary-50/30 transition-all"
+                          >
+                            <td className="px-6 py-4 font-semibold text-stone-800">
+                              <span className="inline-flex items-center justify-center rounded-lg bg-stone-100 px-2 py-1 text-xs text-stone-700 border border-stone-200 font-mono">
+                                {(row.threshold * 100).toFixed(0)}% ({row.threshold.toFixed(2)})
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-stone-600 font-medium">
+                              {formatMetric(row.precision)}
+                            </td>
+                            <td className="px-6 py-4 text-stone-600 font-medium">
+                              {formatMetric(row.recall)}
+                            </td>
+                            <td className="px-6 py-4 bg-pink-50/20 font-extrabold text-pink-700 border-x border-pink-100/60">
+                              <div className="flex items-center gap-2">
+                                <span>{formatMetric(row.f1_score || row.f1)}</span>
+                                {isF1Optimal && (
+                                  <span className="inline-flex h-2 w-2 rounded-full bg-pink-500 animate-ping" />
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-stone-700 font-semibold">
+                              {(row.high_risk_customers ?? row.customer_count ?? "-").toLocaleString?.("id-ID") ?? (row.high_risk_customers ?? "-")}
+                              <span className="text-xs font-normal text-stone-400 ml-1">baris test</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+              {/* Panel Dataset Context Note */}
+              <div className="rounded-xl border border-stone-200 bg-stone-50/60 p-4 flex items-start gap-3">
+                <Info className="h-4 w-4 text-stone-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-stone-600 leading-relaxed">
+                  <strong>Catatan — Panel Dataset (Longitudinal):</strong>{" "}
+                  Angka pada kolom <em>"Prediksi High Risk"</em> adalah jumlah <em>baris observasi test set</em> yang diprediksi berisiko tinggi pada threshold tersebut, <strong>bukan jumlah pelanggan unik.</strong>{" "}
+                  Model dilatih menggunakan data panel di mana satu pelanggan memiliki banyak baris per bulan (test set: 13.055 baris dari 7 observation dates, total 35 tanggal observasi).{" "}
+                  Angka ini digunakan untuk menghitung Precision/Recall secara akurat, bukan untuk mengestimasi jumlah pelanggan aktif berisiko.
+                </p>
+              </div>
+            </>
           ) : (
             <EmptyState 
               icon="-" 
@@ -417,6 +640,7 @@ export default function ModelEvaluation() {
           )}
         </div>
       </div>
+
 
       {/* SECTION 5: FEATURE IMPORTANCE & RISK DISTRIBUTION SIDE-BY-SIDE */}
       <div className="grid gap-6 xl:grid-cols-2">
