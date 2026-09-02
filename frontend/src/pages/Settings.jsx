@@ -91,32 +91,15 @@ function Settings() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
-      {/* Header Banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary-900 via-primary-800 to-rose-900 p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-white/5 blur-2xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold text-pink-200 backdrop-blur-md mb-3 border border-white/10">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>System Configuration</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              Pengaturan Sistem
-            </h1>
-            <p className="mt-1 text-sm text-primary-100/80 max-w-2xl">
-              Kelola batas ambang skor risiko disengagement (*Risk Threshold*), kurun waktu pengamatan transaksi (*Time Window*), dan kredensial akun pengguna.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10">
-            <div className="h-10 w-10 rounded-full bg-pink-500/30 flex items-center justify-center font-bold text-lg text-white border border-pink-300/30">
-              {profile.name.charAt(0)}
-            </div>
-            <div>
-              <p className="text-sm font-semibold leading-tight">{profile.name}</p>
-              <p className="text-xs text-primary-200 capitalize">{profile.role}</p>
-            </div>
-          </div>
-        </div>
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-primary-900 flex items-center gap-2">
+          <SettingsIcon className="h-6 w-6 text-stone-600" />
+          Settings
+        </h1>
+        <p className="mt-1 text-sm text-stone-500">
+          Konfigurasi ambang skor risiko disengagement, kurun waktu pengamatan (*Time Window*), dan keamanan akun pengguna.
+        </p>
       </div>
 
       {/* Main Content Layout */}
