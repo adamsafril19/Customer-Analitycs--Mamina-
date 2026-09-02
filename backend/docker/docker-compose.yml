@@ -78,7 +78,7 @@ services:
   celery-beat:
     build: *backend-build
     container_name: mamina-celery-beat
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: celery -A app.tasks.celery_app beat --loglevel=info -s /tmp/celerybeat-schedule
     environment: *backend-env
     volumes:
       - ../logs:/app/logs
