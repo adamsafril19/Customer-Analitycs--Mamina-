@@ -384,10 +384,9 @@ class PipelineService:
                     continue
                 processed += 1
                 if len(samples) < 10:
-                    sample_row = {
-                        "customer_id": cid,
-                        "customer_name": customer.name,
-                    }
+                    # Technical pipeline output must not carry operational PII.
+                    # customer_id is sufficient to trace a feature snapshot.
+                    sample_row = {"customer_id": cid}
                     sample_row.update(feature_dict)
                     samples.append(sample_row)
             except Exception as exc:
@@ -534,11 +533,7 @@ class PipelineService:
         ).count()
         sample_rows: List[Dict[str, Any]] = []
         sample_candidates = (
-            db.session.query(CustomerNumericFeatures, Customer)
-            .join(
-                Customer,
-                CustomerNumericFeatures.customer_id == Customer.customer_id,
-            )
+            CustomerNumericFeatures.query
             .filter(CustomerNumericFeatures.as_of_date == active_as_of)
             .order_by(
                 CustomerNumericFeatures.tx_count_90d.desc(),
@@ -548,16 +543,15 @@ class PipelineService:
             .all()
         )
         feature_service = FeatureService()
-        for numeric, customer in sample_candidates:
+        for numeric in sample_candidates:
             feature_dict = feature_service.get_ml_feature_dict(
-                str(customer.customer_id),
+                str(numeric.customer_id),
                 active_as_of,
             )
             if not feature_dict:
                 continue
             sample_rows.append({
-                "customer_id": str(customer.customer_id),
-                "customer_name": customer.name,
+                "customer_id": str(numeric.customer_id),
                 **feature_dict,
             })
 

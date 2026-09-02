@@ -473,7 +473,7 @@ function FeatureSample({ rows }) {
       <table className="min-w-full text-sm">
         <thead className="bg-primary-50 text-left text-xs uppercase text-stone-500">
           <tr>
-            <th className="px-3 py-2">Customer</th>
+            <th className="px-3 py-2">Customer ID</th>
             <th className="px-3 py-2">Recency Days</th>
             <th className="px-3 py-2">Tx 90d</th>
             <th className="px-3 py-2">Spend 90d</th>
@@ -483,7 +483,7 @@ function FeatureSample({ rows }) {
         <tbody className="divide-y divide-primary-100">
           {rows.map((row) => (
             <tr key={row.customer_id}>
-              <td className="px-3 py-2 font-medium text-primary-900">{row.customer_name}</td>
+              <td className="px-3 py-2 font-mono text-xs font-medium text-primary-900">{row.customer_id}</td>
               <td className="px-3 py-2">{row.recency_days}</td>
               <td className="px-3 py-2">{row.tx_count_90d}</td>
               <td className="px-3 py-2">{formatNumber(row.spend_90d)}</td>
@@ -733,7 +733,7 @@ function FeaturePreviewModal({ isOpen, onClose, rows }) {
                 <thead className="sticky top-0 bg-stone-50 text-left text-xs uppercase text-stone-500 shadow-sm border-b border-stone-200">
                   <tr>
                     <th className="sticky left-0 bg-stone-50 px-4 py-3 font-bold border-r border-stone-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-10">
-                      Customer
+                      Customer ID
                     </th>
                     {featureKeys.map((key) => (
                       <th key={key} className="px-4 py-3 font-semibold min-w-[200px] border-r border-stone-100 last:border-r-0">
@@ -751,7 +751,7 @@ function FeaturePreviewModal({ isOpen, onClose, rows }) {
                   {rows.map((row, idx) => (
                     <tr key={row.customer_id || idx} className="hover:bg-primary-50/30 transition-colors">
                       <td className="sticky left-0 bg-white group-hover:bg-primary-50 px-4 py-3 font-semibold text-primary-900 border-r border-stone-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-10">
-                        {row.customer_name}
+                        <span className="font-mono text-xs">{row.customer_id}</span>
                       </td>
                       {featureKeys.map((key) => {
                         const val = row[key];
