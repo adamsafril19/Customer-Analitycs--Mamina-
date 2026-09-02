@@ -120,7 +120,7 @@ Salah satu temuan paling penting dalam penelitian ini adalah bahwa **komponen ga
 
 Penurunan ROC-AUC sebesar 0,0273 dan PR-AUC sebesar 0,0279 pada kohort komunikasi menyebabkan kandidat model gated tidak dipromosikan ke produksi. Keputusan ini sejalan dengan prinsip *conservative unimodal fallback* yang divalidasi oleh Zou et al. (2026): ketika modalitas sekunder (teks percakapan) tidak memiliki cukup data untuk menghasilkan sinyal yang reliabel, mempertahankan modalitas primer (transaksi) sebagai satu-satunya dasar keputusan adalah mekanisme keamanan yang secara ilmiah terbukti lebih aman. Hasil ini tidak menunjukkan bahwa pendekatan gated secara umum lebih buruk daripada model transaksi, melainkan bahwa pada cakupan data komunikasi penelitian ini, sinyal WhatsApp belum cukup stabil untuk meningkatkan performa dibanding base model.
 
-Penyebab utama kegagalan komponen adjustment ini dapat ditelusuri pada dua faktor: (1) **sparsitas data komunikasi**—hanya 109 dari 2.423 customer (4,5%) yang memiliki pesan *trusted*, dan hanya 47 customer (1,9%) yang muncul pada kohort training dengan data komunikasi—sehingga logistic adjuster tidak mendapat sinyal yang cukup untuk membangun bobot yang general; (2) **heterogenitas konteks percakapan**—data WhatsApp Mamina bercampur antara reservasi, konsultasi laktasi, dan keluhan operasional, sehingga sinyal yang secara teoritis diharapkan mengindikasikan risiko churn belum cukup terisolasi secara statistik.
+Penyebab utama kegagalan komponen adjustment ini dapat ditelusuri pada dua faktor: (1) **sparsitas data komunikasi**—hanya 109 dari 2.423 customer (4,5%) yang memiliki pesan *trusted*, dan hanya 47 customer (1,9%) yang muncul pada kohort training dengan data komunikasi—sehingga logistic adjuster tidak mendapat sinyal yang cukup untuk membangun bobot yang general; (2) **heterogenitas konteks percakapan**—data WhatsApp Mamina bercampur antara reservasi, konsultasi laktasi, dan keluhan operasional, sehingga sinyal yang secara teoritis diharapkan berkaitan dengan penurunan aktivitas belum cukup terisolasi secara statistik.
 
 Penelitian ini **tidak menyembunyikan kegagalan parsial** komponen gated adjustment ini. Sebaliknya, penelitian ini berargumen bahwa arsitektur yang mampu mendeteksi dan mencegah degradasi model secara otomatis (*fail-closed mechanism*) adalah kontribusi desain sistem yang memiliki nilai ilmiah tersendiri, sebagaimana diperkuat oleh Han et al. (2022) mengenai pentingnya *sparse gating* tingkat sampel.
 
@@ -215,7 +215,7 @@ Nilai penting dari mekanisme ini tidak hanya pada angka keberhasilannya, tetapi 
 
 Penelitian ini memberikan beberapa kontribusi konseptual bagi literatur:
 
-1. **Validasi empiris arsitektur fail-closed pada domain non-kontraktual skala kecil.** Penelitian ini menjadi salah satu studi yang secara eksplisit mendokumentasikan perilaku sistem *gated multimodal* ketika salah satu modalitas tidak memiliki data yang mencukupi. Temuan ini mengonfirmasi dan memperkuat argumen teoretis dari Zou et al. (2026) dengan bukti empiris dari dunia nyata.
+1. **Validasi empiris mekanisme fail-closed pada domain non-kontraktual skala kecil.** Penelitian ini mendokumentasikan hasil pengujian penyesuaian sinyal komunikasi ketika cakupan datanya tidak mencukupi. Mekanisme validasi menonaktifkan penyesuaian tersebut dan mempertahankan model transaksi sebagai model produksi, sehingga tidak ada klaim bahwa skor aktif dihasilkan melalui fusi multimodal.
 
 2. **Demonstrasi peran ganda NLP pada sistem prediktif.** NLP tidak harus berfungsi sebagai fitur prediktif langsung untuk memberikan nilai dalam sistem intelijen pelanggan. Pemanfaatannya sebagai *customer voice provider* pada lapisan rekomendasi adalah model arsitektur yang dapat diadopsi pada konteks serupa.
 
@@ -239,7 +239,7 @@ Penelitian ini memberikan beberapa kontribusi konseptual bagi literatur:
 
 2. **Keterbatasan uji pengguna (user testing) terstruktur.** Meskipun sistem telah diimplementasikan dan antarmuka telah diuji secara fungsional (black-box testing), penelitian ini belum mencakup pengujian kegunaan (*usability testing*) terstruktur dengan responden dari manajemen Mamina menggunakan instrumen seperti System Usability Scale (SUS) atau User Experience Questionnaire (UEQ).
 
-3. **Keterbatasan evaluasi outcome rekomendasi.** Recommendation Policy v2 belum dievaluasi berdasarkan hasil nyata (*outcome*): apakah pelanggan yang menerima intervensi berbasis rekomendasi sistem benar-benar menunjukkan penurunan risiko churn dalam periode berikutnya? Evaluasi ini memerlukan deployment longitudinal yang melampaui cakupan penelitian ini.
+3. **Keterbatasan evaluasi outcome rekomendasi.** Recommendation Policy v2 belum dievaluasi berdasarkan hasil nyata (*outcome*): apakah pelanggan yang menerima intervensi berbasis rekomendasi sistem menunjukkan perbaikan aktivitas pada periode berikutnya? Evaluasi ini memerlukan deployment longitudinal yang melampaui cakupan penelitian ini.
 
 4. **Keterbatasan label target.** Penggunaan *temporal proxy label* berbasis ketidakaktifan, meskipun merupakan pendekatan yang lazim untuk bisnis non-kontraktual, tetap mengandung ketidakpastian. Seorang pelanggan yang tidak melakukan transaksi dalam 90 hari belum tentu telah berpindah ke kompetitor.
 
@@ -253,7 +253,7 @@ Penelitian ini memberikan beberapa kontribusi konseptual bagi literatur:
 
 4. **Penerapan usability testing terstruktur.** Melibatkan pengguna akhir (admin, manajer) dalam sesi pengujian terstruktur menggunakan instrumen SUS atau TAM (*Technology Acceptance Model*) akan memberikan validasi holistik terhadap efektivitas sistem sebagai alat bantu keputusan.
 
-5. **Eksplorasi label churn alternatif.** Mendefinisikan label target menggunakan kombinasi ketidakaktifan transaksi dan penurunan sentimen komunikasi dapat menghasilkan *proxy label* yang lebih selaras dengan kondisi aktual pelanggan yang berisiko.
+5. **Eksplorasi label proksi alternatif.** Mendefinisikan label target menggunakan kombinasi ketidakaktifan transaksi dan penurunan sentimen komunikasi dapat menghasilkan *proxy label* yang lebih selaras dengan kondisi aktual pelanggan yang berisiko.
 
 ---
 

@@ -73,7 +73,7 @@ Selain tantangan linguistik, penggabungan data interaksi WhatsApp dengan data tr
 
 Mengacu pada standar perlindungan data global seperti *General Data Protection Regulation* (GDPR) Pasal 4(5) serta panduan teknis dari *European Union Agency for Cybersecurity* (ENISA), teknik pseudonimisasi adalah prasyarat mutlak atau *privacy-by-design* dalam arsitektur analitik modern (ENISA, 2026). Dalam sistem intelijen pelanggan yang dikembangkan, pemisahan secara tegas antara proses identifikasi pelanggan (*identity resolution*) dan ekstraksi informasi semantik (NLP) diterapkan melalui kerangka *Privacy-Preserving Record Linkage* (PPRL). Literatur terkait PPRL di domain integrasi data lintas platform (seperti proyek EUPID) menegaskan bahwa penggabungan basis data tidak boleh dilakukan dengan menggunakan PII mentah.
 
-Sebagai implementasi teknis, pencocokan data (*data linkage*) dilakukan menggunakan algoritma *hashing* kriptografis deterministik (seperti SHA-256), yang sejalan dengan standar praktik terbaik industri, seperti panduan *Sensitive Data Protection* dari Google Cloud Platform (GCP). Fungsi *hash* kriptografis ini bekerja secara satu arah (mengubah nomor telepon menjadi teks acak tak terbaca), namun bersifat deterministik, sehingga nomor WhatsApp yang sama akan senantiasa menghasilkan nilai *hash* yang sama persis. Pendekatan arsitektural ini memastikan bahwa *Identity Graph* pelanggan tetap terbentuk secara utuh. Model analitik pada sistem (XGBoost) tetap mengetahui probabilitas churn dari "Pelanggan A" sekaligus mengetahui bahwa keluhan tersebut memang berasal dari "Pelanggan A", tanpa model maupun operator perlu mengetahui nomor telepon asli milik Pelanggan A. Pendekatan ini menjamin keandalan fusi data multimodal sekaligus memastikan kepatuhan sistem terhadap prinsip-prinsip etika privasi data.
+Sebagai implementasi teknis, pencocokan data (*data linkage*) dilakukan menggunakan algoritma *hashing* kriptografis deterministik (seperti SHA-256), yang sejalan dengan standar praktik terbaik industri, seperti panduan *Sensitive Data Protection* dari Google Cloud Platform (GCP). Fungsi *hash* kriptografis ini bekerja secara satu arah (mengubah nomor telepon menjadi teks acak tak terbaca), namun bersifat deterministik, sehingga nomor WhatsApp yang sama akan senantiasa menghasilkan nilai *hash* yang sama persis. Pendekatan arsitektural ini memastikan bahwa *Identity Graph* pelanggan tetap terbentuk secara utuh. Sistem dapat menghubungkan skor risiko berbasis transaksi dan konteks percakapan milik pelanggan yang sama tanpa membuat model maupun operator mengetahui nomor telepon aslinya. Pendekatan ini mendukung keandalan pengaitan data sekaligus memastikan kepatuhan sistem terhadap prinsip-prinsip etika privasi data.
 
 ## 2.4 Arsitektur NLP: Penanganan Bahasa Indonesia Informal
 ### 2.4.1 Normalisasi Teks dan Preprocessing Adaptif
@@ -248,7 +248,7 @@ Lebih lanjut, implementasi analitik preskriptif tidak boleh memukul rata semua s
 ```mermaid
 flowchart TD
     %% Data Sources
-    subgraph Input ["Input Data (Multimodal)"]
+    subgraph Input ["Input Data yang Saling Melengkapi"]
         A1[Data Transaksi CRM] -->|RFM, Tenure| B1
         A2[Log Chat WhatsApp] -->|Teks Informal| B2
     end
@@ -274,7 +274,7 @@ flowchart TD
     %% Output
     subgraph Output ["Output & Actionable Insights"]
         G[Dashboard Intelijen Pelanggan]
-        H1(Skor Risiko Churn)
+        H1(Skor Risiko Penurunan Aktivitas)
         H2(Rekomendasi Tindakan)
         H3(Tren Isu Operasional)
         
@@ -288,20 +288,20 @@ flowchart TD
         H3 --> G
     end
 ```
-Kerangka pemikiran penelitian ini dirancang untuk mentransformasi manajemen pelanggan di Mamina Baby Spa dari pendekatan yang bersifat reaktif menjadi proaktif berbasis data (data-driven customer intelligence). Pendekatan ini berangkat dari premis bahwa indikator risiko churn pada bisnis non-kontraktual tidak hanya tercermin dari data transaksi, tetapi juga dari pola interaksi pelanggan yang terekam dalam komunikasi sehari-hari, khususnya melalui WhatsApp:
+Kerangka pemikiran penelitian ini dirancang untuk membantu manajemen Mamina Baby Spa memantau risiko penurunan aktivitas pelanggan secara berbasis data. Data transaksi digunakan sebagai dasar perhitungan skor risiko, sedangkan percakapan WhatsApp digunakan sebagai konteks suara pelanggan dan diuji secara bersyarat sebagai sinyal tambahan:
 
 ### 2.8.1 Identifikasi Masalah (Problem Domain)
-Permasalahan utama yang dihadapi manajemen adalah ketidakmampuan mendeteksi pelanggan yang berisiko churn secara dini. Pada konteks bisnis non-kontraktual, indikator berbasis transaksi (seperti penurunan frekuensi kunjungan) bersifat lagging indicator, karena hanya muncul setelah perilaku churn benar-benar terjadi.
+Permasalahan utama yang dihadapi manajemen adalah belum tersedianya ukuran terstruktur untuk memprioritaskan pelanggan yang mengalami risiko penurunan aktivitas. Pada konteks bisnis non-kontraktual, kondisi berhenti menggunakan layanan tidak tercatat secara eksplisit. Oleh karena itu, perubahan frekuensi, nilai, dan jarak waktu transaksi digunakan sebagai dasar pembentukan skor risiko.
 Di sisi lain, percakapan WhatsApp pelanggan mengandung sinyal awal (*leading indicators*) berupa keluhan, ketidakpuasan, atau perubahan nada komunikasi. Namun, sinyal ini belum dimanfaatkan karena:
 1. Volumenya besar,
 2. Berbentuk data teks tidak terstruktur,
 3. Dan sulit dianalisis secara manual.
 
-### 2.8.2 Input Data (Sumber Data Multimodal)
-Untuk menangkap sinyal churn secara lebih komprehensif, penelitian ini menggunakan pendekatan multimodal dengan dua sumber data utama:
+### 2.8.2 Input Data (Sumber Data yang Saling Melengkapi)
+Penelitian ini menggunakan dua sumber data yang memiliki fungsi berbeda:
 * **Data Transaksional (Terstruktur)**: Riwayat kunjungan dan pembayaran pelanggan yang mencerminkan pola perilaku konsumsi.
 * **Data Teks Interaksi WhatsApp (Tidak Terstruktur)**: Log percakapan pelanggan dengan admin yang merepresentasikan pengalaman, persepsi, dan respons emosional pelanggan terhadap layanan.
-Kedua sumber data ini dipandang saling melengkapi, bukan saling menggantikan.
+Data transaksi menjadi sumber utama model skor risiko. Data teks melengkapi hasil tersebut dengan konteks suara pelanggan dan hanya diuji sebagai penyesuaian skor apabila cakupan serta kualitasnya memenuhi kriteria validasi.
 
 ### 2.8.3 Proses Komputasi (AI/ML Pipeline)
 Pemrosesan data dilakukan melalui beberapa jalur analitik yang memiliki fungsi berbeda namun terintegrasi dalam satu kerangka Customer Intelligence.
@@ -319,12 +319,12 @@ Sinyal NLP seperti *complaint_ratio* dan tren sentimen tidak dimasukkan sembaran
 
 ### 2.8.4 Output Sistem (Decision Support)
 Hasil analisis disajikan dalam bentuk Dashboard Intelijen Pelanggan yang berfungsi sebagai Decision Support System, dengan komponen utama:
-* **Skor Risiko Churn**: Probabilitas pelanggan akan berhenti dalam jangka waktu tertentu.
+* **Skor Risiko Penurunan Aktivitas**: Nilai kontinu 0 sampai 1 yang menunjukkan tingkat risiko relatif berdasarkan pola perilaku pelanggan, bukan probabilitas churn aktual.
 * **Penjelasan Model (Explainable AI)**: Interpretasi kontribusi fitur terhadap prediksi risiko menggunakan nilai SHAP, sehingga keputusan tidak bersifat *black box*.
 * **Tren Tema Interaksi**: Visualisasi topik percakapan pelanggan untuk membantu manajemen memahami konteks masalah yang sedang berkembang.
 
 ### 2.8.5 Dampak Bisnis (Business Outcome)
 Dengan mengintegrasikan analitik prediktif dan deskriptif, sistem memungkinkan manajemen untuk:
 1. Mengidentifikasi pelanggan berisiko secara lebih dini.
-2. Memahami penyebab potensial churn.
-3. Melakukan strategi retensi yang tepat sasaran sebelum pelanggan benar-benar berhenti menggunakan layanan (*silent attrition prevention*).
+2. Memahami konteks transaksi dan percakapan yang berkaitan dengan tingkat risiko.
+3. Menyusun tindak lanjut retensi yang lebih terarah berdasarkan prioritas risiko dan konteks pelanggan.

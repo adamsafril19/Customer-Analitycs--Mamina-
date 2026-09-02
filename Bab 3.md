@@ -272,7 +272,7 @@ Evaluasi dilakukan pada data uji temporal menggunakan:
 6. **Accuracy**, sebagai metrik pelengkap, bukan acuan tunggal.
 7. **Threshold sensitivity**, dengan membandingkan precision, recall, F1-score, dan jumlah pelanggan berisiko pada beberapa ambang.
 
-Perbandingan baseline dengan kandidat penyesuaian komunikasi dilakukan pada kohort yang sama-sama memiliki sinyal komunikasi. Cara ini mencegah kesimpulan peningkatan multimodal berasal dari perbedaan populasi evaluasi.
+Perbandingan baseline dengan kandidat penyesuaian komunikasi dilakukan pada kohort yang sama-sama memiliki sinyal komunikasi. Cara ini mencegah kesimpulan peningkatan kinerja berasal dari perbedaan populasi evaluasi.
 
 ### 3.9.2 Evaluasi NLP dan Konteks Semantik
 
