@@ -13,7 +13,7 @@ COPY requirements.txt .
 ENV PIP_DEFAULT_TIMEOUT=300 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_RETRIES=10
-RUN pip install --user --timeout 300 --retries 10 -r requirements.txt
+RUN pip install --no-cache-dir --user --timeout 300 --retries 10 -r requirements.txt
 
 FROM python:3.10-slim AS runtime
 

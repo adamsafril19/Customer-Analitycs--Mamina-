@@ -14,8 +14,7 @@ COPY requirements.txt .
 ENV PIP_DEFAULT_TIMEOUT=300 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_RETRIES=10
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --user --timeout 300 --retries 10 -r requirements.txt
+RUN pip install --no-cache-dir --user --timeout 300 --retries 10 -r requirements.txt
 
 
 # Runtime stage. Code-only rebuilds should usually start here from cached deps.
