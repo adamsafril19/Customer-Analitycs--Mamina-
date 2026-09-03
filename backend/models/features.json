@@ -56,6 +56,6 @@
   "expected_shape": 25,
   "model_type": "gated_transaction_xgb_logistic",
   "neutralized_model_features": [],
-  "version": "v20260707_211306",
-  "trained_at": "2026-07-07T21:25:45.027925"
+  "version": "v20260902_130504",
+  "trained_at": "2026-09-02T13:32:23.841070"
 }

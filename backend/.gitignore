@@ -231,4 +231,6 @@ models/**/*.pkl
 models/**/*.joblib
 models/topic_model
 models/topic_model_legacy_*
+models/real_data_backup_*/
+models/notebook_overwrite_*/
 docker-compose.override.yml
