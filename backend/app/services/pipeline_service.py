@@ -789,6 +789,16 @@ class ModelEvaluationService:
             found = query.filter_by(model_version=version).first()
             if found:
                 return found
+        else:
+            try:
+                active = MLModelRegistry.get_active()
+                if active and active.model_version:
+                    found = query.filter_by(model_version=active.model_version).first()
+                    if found:
+                        return found
+            except Exception:
+                pass
+
         return query.order_by(ModelVersion.trained_at.desc(), ModelVersion.created_at.desc()).first()
 
     def _business_summary(self, metrics: Dict[str, Optional[float]]) -> Dict[str, str]:
@@ -878,7 +888,9 @@ class ModelEvaluationService:
 
             ml_service = current_app.config.get("ML_SERVICE")
             model = getattr(ml_service, "model", None)
-            importances = getattr(model, "feature_importances_", None)
+            base_model = getattr(model, "base_model", None)
+            xgb_target = base_model if base_model is not None else model
+            importances = getattr(xgb_target, "feature_importances_", None)
             names = FeatureService.get_feature_names()
             if importances is None or len(importances) != len(names):
                 return []
