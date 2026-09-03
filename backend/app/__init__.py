@@ -286,6 +286,22 @@ def load_ml_models(app: Flask) -> None:
     - LOADED_SHAP_EXPLAINER: SHAP explainer for interpretability
     - FEATURE_METADATA: Feature names and types
     """
+    import shutil
+    # Ensure models directory has the required artifacts copied from embedded app/model_artifacts
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(app_dir, "model_artifacts")
+    if os.path.exists(src_dir):
+        for target in ["models", "/app/models"]:
+            try:
+                os.makedirs(target, exist_ok=True)
+                for fname in os.listdir(src_dir):
+                    s = os.path.join(src_dir, fname)
+                    d = os.path.join(target, fname)
+                    if os.path.isfile(s) and (not os.path.exists(d) or os.path.getsize(d) == 0):
+                        shutil.copy2(s, d)
+            except Exception:
+                pass
+
     from app.services.ml_service import MLService
     
     try:

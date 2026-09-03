@@ -11,12 +11,15 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 import gc
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import joblib
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from flask import current_app
 from sqlalchemy import func
 

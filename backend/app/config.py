@@ -60,12 +60,28 @@ class Config:
     CELERY_TASK_TRACK_STARTED = True
     CELERY_TASK_TIME_LIMIT = 300  # 5 minutes
     
-    # ML Models
-    MODEL_PATH = os.getenv("MODEL_PATH", "models/multimodal_model.pkl")
-    SCALER_PATH = os.getenv("SCALER_PATH", "models/scaler.pkl")
+    # ML Models (with automatic fallback to embedded app/model_artifacts)
+    @staticmethod
+    def _resolve_model_path(env_var, default_rel, artifact_fname):
+        val = os.getenv(env_var)
+        if val and os.path.exists(val):
+            return val
+        if os.path.exists(default_rel):
+            return default_rel
+        alt = f"/app/{default_rel}"
+        if os.path.exists(alt):
+            return alt
+        _a_dir = os.path.dirname(os.path.abspath(__file__))
+        emb = os.path.join(_a_dir, "model_artifacts", artifact_fname)
+        if os.path.exists(emb):
+            return emb
+        return default_rel
+
+    MODEL_PATH = _resolve_model_path.__func__("MODEL_PATH", "models/multimodal_model.pkl", "multimodal_model.pkl")
+    SCALER_PATH = _resolve_model_path.__func__("SCALER_PATH", "models/scaler.pkl", "scaler.pkl")
     VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "models/vectorizer.pkl")
-    FEATURE_META_PATH = os.getenv("FEATURE_META_PATH", "models/features.json")
-    SHAP_EXPLAINER_PATH = os.getenv("SHAP_EXPLAINER_PATH", "models/shap_explainer.pkl")
+    FEATURE_META_PATH = _resolve_model_path.__func__("FEATURE_META_PATH", "models/features.json", "features.json")
+    SHAP_EXPLAINER_PATH = _resolve_model_path.__func__("SHAP_EXPLAINER_PATH", "models/shap_explainer.pkl", "shap_explainer.pkl")
     
     # Model Config
     MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
