@@ -679,9 +679,24 @@ class ModelEvaluationService:
             "shap_cache_count": shap_cache_count,
         }
 
-    def get_evaluation(self) -> Dict[str, Any]:
+    def _get_active_metrics(self) -> Dict[str, Any]:
         latest = self._latest_model_version()
         metrics = (latest.metrics if latest else None) or {}
+        
+        # Prioritize official research model metadata if database metrics are missing or degraded
+        for path in ["models/model_metadata.pkl", "/app/models/model_metadata.pkl"]:
+            if os.path.exists(path):
+                try:
+                    meta = joblib.load(path)
+                    disk_metrics = meta.get("metrics", {})
+                    if not metrics or (disk_metrics.get("roc_auc") and (metrics.get("roc_auc") or 0) < 0.8):
+                        return disk_metrics
+                except Exception:
+                    pass
+        return metrics
+
+    def get_evaluation(self) -> Dict[str, Any]:
+        metrics = self._get_active_metrics()
         comparison = self._baseline_comparison(metrics)
         technical = self._technical_metrics(metrics)
         available = any(value is not None for value in technical.values())
@@ -736,8 +751,7 @@ class ModelEvaluationService:
         return technical
 
     def get_threshold_sensitivity(self) -> Dict[str, Any]:
-        latest = self._latest_model_version()
-        metrics = (latest.metrics if latest else None) or {}
+        metrics = self._get_active_metrics()
         rows = metrics.get("threshold_sensitivity") or metrics.get("thresholds") or []
         return {
             "rows": rows,

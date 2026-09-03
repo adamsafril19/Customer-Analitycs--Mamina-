@@ -224,13 +224,12 @@ dmypy.json
 *.swp
 *.swo
 
-# ML Models (not in git, loaded at runtime)
-models/*.pkl
-models/*.joblib
-models/**/*.pkl
-models/**/*.joblib
-models/topic_model
+# ML Models (keep production model artifacts, exclude large training caches)
+models/topic_model/
 models/topic_model_legacy_*
 models/real_data_backup_*/
 models/notebook_overwrite_*/
+!models/*.pkl
+!models/*.json
+!models/*.joblib
 docker-compose.override.yml
