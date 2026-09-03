@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Dependency stage. This is the expensive layer and should only rebuild when
 # requirements.txt changes.
 FROM python:3.10-slim AS deps
