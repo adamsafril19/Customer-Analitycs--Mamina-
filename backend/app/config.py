@@ -73,7 +73,7 @@ class Config:
     RISK_HIGH_THRESHOLD = float(os.getenv("RISK_HIGH_THRESHOLD", "0.90"))
     ENABLE_SHAP = os.getenv("ENABLE_SHAP", "true").lower() == "true"
     SHAP_BACKGROUND_MODE = os.getenv("SHAP_BACKGROUND_MODE", "true").lower() == "true"
-    TOPIC_MODEL_PATH = os.getenv("TOPIC_MODEL_PATH")
+    TOPIC_MODEL_PATH = os.getenv("TOPIC_MODEL_PATH", "models/topic_model")
     NLP_STRICT = os.getenv("NLP_STRICT", "true").lower() == "true"
     
     # Logging

@@ -564,9 +564,17 @@ class PipelineService:
         }
 
     def _topic_model_status(self) -> Dict[str, Any]:
-        configured_path = current_app.config.get("TOPIC_MODEL_PATH")
-        path_exists = bool(configured_path and Path(configured_path).exists())
-        training_lock_exists = Path("/app/models/.topic_model_training.lock").exists()
+        configured_path = current_app.config.get("TOPIC_MODEL_PATH") or "models/topic_model"
+        path_exists = bool(
+            configured_path and (
+                Path(configured_path).exists() or 
+                Path(f"/app/{configured_path}").exists()
+            )
+        )
+        training_lock_exists = (
+            Path("/app/models/.topic_model_training.lock").exists() or 
+            Path("models/.topic_model_training.lock").exists()
+        )
         latest_topic = Topic.query.order_by(Topic.created_at.desc()).first()
         latest_version = latest_topic.model_version if latest_topic else None
         topic_query = Topic.query
@@ -574,19 +582,25 @@ class PipelineService:
             topic_query = topic_query.filter(Topic.model_version == latest_version)
         topic_count = topic_query.count() if latest_version else 0
 
+        # In multi-container cloud deployments (Worker & Backend API in isolated containers),
+        # trained topics and evaluation metrics are persisted in PostgreSQL.
+        has_topics = bool(topic_count > 0)
+
         if training_lock_exists:
             status = "processing"
-        elif path_exists and topic_count:
+        elif has_topics:
             status = "completed"
-        elif configured_path or topic_count:
-            status = "partial"
+        elif path_exists:
+            status = "completed"
+        elif configured_path:
+            status = "pending"
         else:
             status = "pending"
 
         return {
             "status": status,
             "configured_path": configured_path,
-            "model_exists": path_exists,
+            "model_exists": path_exists or has_topics,
             "topic_count": int(topic_count),
             "model_version": latest_version,
             "latest_trained_at": latest_topic.created_at.isoformat() if latest_topic and latest_topic.created_at else None,
