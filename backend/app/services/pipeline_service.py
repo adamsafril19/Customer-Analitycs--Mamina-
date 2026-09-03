@@ -418,6 +418,16 @@ class PipelineService:
 
         ml_service = current_app.config.get("ML_SERVICE")
         if not ml_service or not ml_service.is_model_loaded():
+            try:
+                from app.services.ml_service import MLService
+                ml_service = MLService()
+                ml_service.load_all_models()
+                current_app.config["ML_SERVICE"] = ml_service
+                current_app.config["MODEL_LOADED"] = ml_service.is_model_loaded()
+            except Exception as exc:
+                logger.warning("Failed to auto-load ML models in run_scoring: %s", exc)
+
+        if not ml_service or not ml_service.is_model_loaded():
             raise RuntimeError("Model risk scoring belum dimuat")
 
         feature_service = FeatureService()
