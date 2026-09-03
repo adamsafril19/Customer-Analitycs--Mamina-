@@ -11,9 +11,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 import gc
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import joblib
 import numpy as np
 from flask import current_app
 from sqlalchemy import func
@@ -651,7 +653,7 @@ class ModelEvaluationService:
             latest = self._latest_model_version(active.model_version if active else None)
         except Exception:
             latest = None
-        metrics = (latest.metrics if latest else None) or {}
+        metrics = self._get_active_metrics()
         shap_cache_count = ShapCache.query.filter_by(
             explanation_type="shap"
         ).count()
@@ -680,8 +682,12 @@ class ModelEvaluationService:
         }
 
     def _get_active_metrics(self) -> Dict[str, Any]:
-        latest = self._latest_model_version()
-        metrics = (latest.metrics if latest else None) or {}
+        metrics = {}
+        try:
+            latest = self._latest_model_version()
+            metrics = (latest.metrics if latest else None) or {}
+        except Exception:
+            metrics = {}
         
         # Prioritize official research model metadata if database metrics are missing or degraded
         for path in ["models/model_metadata.pkl", "/app/models/model_metadata.pkl"]:
@@ -796,24 +802,27 @@ class ModelEvaluationService:
         # model_versions is also used by BERTopic. Restrict risk-model
         # evaluation to XGBoost/composite artifacts so a newer topic model
         # cannot be presented as the active scoring model.
-        query = ModelVersion.query.filter(
-            ModelVersion.model_path.ilike("%multimodal_model.pkl")
-        )
-        if version:
-            found = query.filter_by(model_version=version).first()
-            if found:
-                return found
-        else:
-            try:
-                active = MLModelRegistry.get_active()
-                if active and active.model_version:
-                    found = query.filter_by(model_version=active.model_version).first()
-                    if found:
-                        return found
-            except Exception:
-                pass
+        try:
+            query = ModelVersion.query.filter(
+                ModelVersion.model_path.ilike("%multimodal_model.pkl")
+            )
+            if version:
+                found = query.filter_by(model_version=version).first()
+                if found:
+                    return found
+            else:
+                try:
+                    active = MLModelRegistry.get_active()
+                    if active and active.model_version:
+                        found = query.filter_by(model_version=active.model_version).first()
+                        if found:
+                            return found
+                except Exception:
+                    pass
 
-        return query.order_by(ModelVersion.trained_at.desc(), ModelVersion.created_at.desc()).first()
+            return query.order_by(ModelVersion.trained_at.desc(), ModelVersion.created_at.desc()).first()
+        except Exception:
+            return None
 
     def _business_summary(self, metrics: Dict[str, Optional[float]]) -> Dict[str, str]:
         recall = metrics.get("recall")
